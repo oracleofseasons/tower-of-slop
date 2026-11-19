@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import zlib
 
 import msgpack
 from PIL import Image
@@ -103,12 +104,16 @@ def main():
     for s in g['sounds']:
         ext = s['filetype'] or '.bin'
         if s['data']:
-            write(f'{out}/sounds/{safe(s["name"])}{ext}', bytes(s['data']), 'wb')
+            data = bytes(s['data'])
+            if data[:2] == b'\x78\x9c':   # GM7 stores sound files zlib-compressed
+                data = zlib.decompress(data)
+            write(f'{out}/sounds/{safe(s["name"])}{ext}', data, 'wb')
         write(f'{out}/sounds/{safe(s["name"])}.json',
               json.dumps({k: v for k, v in s.items() if k != 'data'}, indent=1))
 
     for s in g['scripts']:
         write(f'{out}/scripts/{safe(s["name"])}.gml', s['script'])
+    write(f'{out}/scripts/index.json', json.dumps({s['name']: s['id'] for s in g['scripts']}, indent=1))
 
     for o in g['objects']:
         d = f'{out}/objects/{safe(o["name"])}'

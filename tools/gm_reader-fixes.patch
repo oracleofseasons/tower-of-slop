@@ -1,0 +1,12 @@
+diff --git a/src/decoder/mod.rs b/src/decoder/mod.rs
+index c3dab45..ac2944d 100644
+--- a/src/decoder/mod.rs
++++ b/src/decoder/mod.rs
+@@ -604,6 +604,7 @@ fn read_fonts(game: &mut Game, stream: &mut BufferStream) -> io::Result<()> {
+                 glyph.kerning = stream.next_i32()?;
+                 glyphs.push(glyph);
+             }
++            font.atlas.glyphs = glyphs;
+             font.atlas.image.width = stream.next_u32()?;
+             font.atlas.image.height = stream.next_u32()?;
+             font.atlas.image.data = if version == 540 {

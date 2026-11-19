@@ -13,6 +13,7 @@ GM_READER_REV=73611a4df929ad144de399828b90eb8fed40ef09
 if [ ! -d "$T/gm_reader" ]; then
     git clone https://github.com/elipsitz/gm_reader.git "$T/gm_reader"
     git -C "$T/gm_reader" checkout -q "$GM_READER_REV"
+    git -C "$T/gm_reader" apply "$T/gm_reader-fixes.patch"   # keep GM7 font glyph metrics
     (cd "$T/gm_reader" && cargo update -p rmp --precise 0.8.9 && cargo update -p image --precise 0.23.2)
 fi
 [ -x "$T/gm_reader/target/release/gm_reader" ] || (cd "$T/gm_reader" && cargo build --release)
