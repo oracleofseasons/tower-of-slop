@@ -23,3 +23,9 @@ mkdir -p "$ROOT/extracted"
 rm -rf "$ROOT/extracted/project"
 "$T/.venv/bin/python" -I "$T/gm7extract/dump.py" "$T/gm_reader/src/game.rs" \
     "$ROOT/extracted/game.msgpack" "$ROOT/extracted/project"
+
+# Built-in usage report (needs tools/OpenGMK for the cross-reference)
+if [ -d "$T/OpenGMK" ]; then
+    python3 -I "$T/gm7extract/inventory.py" "$ROOT/extracted/project" \
+        "$T/OpenGMK/gm8emulator/src" "$ROOT/docs/inventory.md" "$ROOT/extracted/inventory.json"
+fi

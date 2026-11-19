@@ -15,3 +15,5 @@ No game assets are in this repo. You need your own copy of the game.
 
 - `tools/gm7extract/gm7decrypt.py`: standalone GM7 asset-stream decryptor (GMKrypt)
 - `tools/gm7extract/dump.py`: converts gm_reader output into plain files
+- `tools/gm7extract/inventory.py`: lists the GM built-ins the game uses (writes `docs/inventory.md`)
+- `docs/`: notes on the port
