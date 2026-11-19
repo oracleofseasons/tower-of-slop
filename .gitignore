@@ -1,0 +1,12 @@
+# Game files: personal copy only, never commit
+original/
+extracted/
+
+# Third-party tools (fetched by tools/extract.sh / cloned for reference)
+tools/gm_reader/
+tools/OpenGMK/
+tools/.venv/
+
+# Build output
+build/
+__pycache__/
