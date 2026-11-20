@@ -11,3 +11,8 @@ tools/.venv/
 build/
 build-trace/
 __pycache__/
+platform/switch/build/
+platform/switch/toh.nro
+platform/switch/toh.nacp
+platform/switch/toh.elf
+platform/switch/*.map
