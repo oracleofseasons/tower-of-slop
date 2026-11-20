@@ -1,0 +1,23 @@
+Tower of Heaven: an unofficial engine for the original game
+===========================================================
+
+This runs Askiisoft's Tower of Heaven (2009) on a new engine. It does not
+include the game: it needs your own copy of the original Windows version.
+
+1. Put "Tower of Heaven.exe" (from the original game) in this folder,
+   next to "toh".
+2. Run ./toh
+
+The first start reads the game out of the exe (it takes under a second) and
+keeps it in ~/.local/share/Askiisoft/Tower of Heaven/. After that the exe
+is no longer needed. Saves go to the same folder.
+
+Controls are the original's: arrow keys to move, Up or Z to jump, Down or
+X to talk and use doors, Q for the menu, W for the rulebook.
+
+Switch 2 (homebrew): put toh.nro and "Tower of Heaven.exe" together in
+sdmc:/switch/toh/ and start it from the homebrew menu. Controls: stick or
+D-pad to move, A or Y to jump, B or X to talk and use doors, + for the
+menu, - for the rulebook.
+
+Source and licence (GPL-2.0): see THIRD_PARTY.md and LICENSE.

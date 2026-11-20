@@ -16,3 +16,4 @@ platform/switch/toh.nro
 platform/switch/toh.nacp
 platform/switch/toh.elf
 platform/switch/*.map
+dist/
