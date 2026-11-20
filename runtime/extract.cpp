@@ -596,7 +596,126 @@ std::vector<uint8_t> write_pak(const GameData& g) {
     return buf;
 }
 
+// ------------------------------------------------------------------ the exe's icon (PE resources)
+
+struct Pe {
+    const std::vector<uint8_t>& d;
+    std::vector<std::array<uint32_t, 4>> secs;   // virtual size, virtual address, raw size, raw offset
+    uint32_t res = 0;                            // file offset of the resource directory
+    uint32_t u32(size_t o) const { if (o + 4 > d.size()) throw Fail("bad exe"); uint32_t v; std::memcpy(&v, &d[o], 4); return v; }
+    uint16_t u16(size_t o) const { if (o + 2 > d.size()) throw Fail("bad exe"); uint16_t v; std::memcpy(&v, &d[o], 2); return v; }
+    uint32_t off(uint32_t rva) const {
+        for (auto& s : secs)
+            if (rva >= s[1] && rva < s[1] + std::max(s[0], s[2])) return rva - s[1] + s[3];
+        throw Fail("bad resource address");
+    }
+    explicit Pe(const std::vector<uint8_t>& data) : d(data) {
+        uint32_t pe = u32(0x3C);
+        if (u32(pe) != 0x4550) throw Fail("not a Windows exe");
+        uint16_t nsec = u16(pe + 6), optsz = u16(pe + 20);
+        uint32_t opt = pe + 24;
+        uint32_t dirs = opt + (u16(opt) == 0x10b ? 96 : 112);
+        uint32_t res_rva = u32(dirs + 16);
+        for (uint16_t i = 0; i < nsec; i++) {
+            uint32_t s = opt + optsz + i * 40u;
+            secs.push_back({u32(s + 8), u32(s + 12), u32(s + 16), u32(s + 20)});
+        }
+        if (!res_rva) throw Fail("the exe has no resources");
+        res = off(res_rva);
+    }
+    // entries of the directory at `o` (relative to the resource root): (id, offset with subdirectory bit)
+    std::vector<std::pair<uint32_t, uint32_t>> dir(uint32_t o) const {
+        std::vector<std::pair<uint32_t, uint32_t>> out;
+        uint32_t n = static_cast<uint32_t>(u16(res + o + 12)) + u16(res + o + 14);
+        for (uint32_t i = 0; i < n; i++) out.push_back({u32(res + o + 16 + 8 * i), u32(res + o + 20 + 8 * i)});
+        return out;
+    }
+    // file offset and size of the first language of resource `type` / `id` (id ~0u: any)
+    bool find(uint32_t type, uint32_t id, uint32_t& at, uint32_t& size) const {
+        for (auto& [t, toff] : dir(0)) {
+            if (t != type || !(toff & 0x80000000u)) continue;
+            for (auto& [n, noff] : dir(toff & 0x7FFFFFFFu)) {
+                if ((id != ~0u && n != id) || !(noff & 0x80000000u)) continue;
+                for (auto& [l, loff] : dir(noff & 0x7FFFFFFFu)) {
+                    (void)l;
+                    at = off(u32(res + loff));
+                    size = u32(res + loff + 4);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+};
+
 }  // namespace
+
+bool extract_icon(const std::string& exe_path, int& w, int& h, std::vector<uint8_t>& rgba, std::string& error) {
+    try {
+        std::ifstream f(exe_path, std::ios::binary);
+        if (!f) throw Fail("cannot open " + exe_path);
+        std::vector<uint8_t> exe((std::istreambuf_iterator<char>(f)), {});
+        Pe pe(exe);
+        uint32_t at, size;
+        if (!pe.find(14, ~0u, at, size)) throw Fail("the exe has no icon");
+        // the group's largest image (0 = 256), then the deepest
+        uint16_t count = pe.u16(at + 4);
+        int best_w = -1, best_bpp = -1;
+        uint32_t best_id = 0;
+        for (uint16_t i = 0; i < count; i++) {
+            uint32_t e = at + 6 + 14u * i;
+            int ew = exe.at(e) ? exe.at(e) : 256, bpp = pe.u16(e + 6);
+            if (ew > best_w || (ew == best_w && bpp > best_bpp)) { best_w = ew; best_bpp = bpp; best_id = pe.u16(e + 12); }
+        }
+        if (best_w < 0 || !pe.find(3, best_id, at, size)) throw Fail("icon image missing");
+        if (size >= 8 && std::memcmp(&exe[at], "\x89PNG", 4) == 0) throw Fail("PNG icons are not supported");
+        // BITMAPINFOHEADER; the height counts the colour image and the AND mask
+        int32_t bw = static_cast<int32_t>(pe.u32(at + 4)), bh = static_cast<int32_t>(pe.u32(at + 8)) / 2;
+        int bpp = pe.u16(at + 14);
+        uint32_t hdr = pe.u32(at), ncolors = pe.u32(at + 32);
+        if (bw <= 0 || bh <= 0 || bw > 256 || bh > 256 || pe.u32(at + 16) != 0) throw Fail("unsupported icon format");
+        if (bpp != 32 && bpp != 24 && bpp != 8 && bpp != 4 && bpp != 1) throw Fail("unsupported icon depth");
+        uint32_t palette = at + hdr;
+        if (bpp <= 8 && ncolors == 0) ncolors = 1u << bpp;
+        uint32_t pixels = palette + (bpp <= 8 ? ncolors * 4 : 0);
+        uint32_t stride = ((bw * bpp + 31) / 32) * 4, mask_stride = ((bw + 31) / 32) * 4;
+        uint32_t mask = pixels + stride * bh;
+        w = bw;
+        h = bh;
+        rgba.assign(static_cast<size_t>(bw) * bh * 4, 0);
+        bool any_alpha = false;
+        for (int y = 0; y < bh; y++) {
+            uint32_t row = pixels + stride * (bh - 1 - y);   // bottom-up
+            for (int x = 0; x < bw; x++) {
+                uint8_t* o = &rgba[(static_cast<size_t>(y) * bw + x) * 4];
+                if (bpp >= 24) {
+                    uint32_t p = row + x * (bpp / 8);
+                    o[0] = exe.at(p + 2); o[1] = exe.at(p + 1); o[2] = exe.at(p);
+                    o[3] = bpp == 32 ? exe.at(p + 3) : 255;
+                } else {
+                    uint32_t bit = static_cast<uint32_t>(x) * bpp;
+                    uint8_t byte = exe.at(row + bit / 8);
+                    uint32_t idx = (byte >> (8 - bpp - bit % 8)) & ((1u << bpp) - 1);
+                    uint32_t c = palette + 4 * idx;
+                    o[0] = exe.at(c + 2); o[1] = exe.at(c + 1); o[2] = exe.at(c);
+                    o[3] = 255;
+                }
+                any_alpha |= bpp == 32 && o[3] != 0;
+            }
+        }
+        if (!any_alpha) {   // no alpha channel: transparency comes from the AND mask
+            for (int y = 0; y < bh; y++)
+                for (int x = 0; x < bw; x++) {
+                    uint8_t byte = exe.at(mask + mask_stride * (bh - 1 - y) + x / 8);
+                    rgba[(static_cast<size_t>(y) * bw + x) * 4 + 3] = (byte >> (7 - x % 8)) & 1 ? 0 : 255;
+                }
+        }
+        return true;
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
+}
 
 bool extract_pak(const std::string& exe_path, std::vector<uint8_t>& pak, std::string& error) {
     try {

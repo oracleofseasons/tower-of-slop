@@ -44,6 +44,10 @@ static int vk_from_scancode(SDL_Scancode sc) {
     return -1;
 }
 
+#ifdef __SWITCH__
+bool toh_switch_install_icon(const std::string& exe, const std::string& self_nro, const std::string& data_dir);
+#endif
+
 static bool is_current_pak(const std::string& path) {
     FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) return false;
@@ -67,6 +71,24 @@ static void fatal(const std::string& msg, bool headless) {
     if (!headless) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Tower of Heaven", msg.c_str(), nullptr);
 }
 
+static const char* const kExeName = "Tower of Heaven.exe";
+
+// the original exe: --game, else next to this program, in the current folder or in the data folder
+static std::string find_exe(const std::string& game_arg, const std::string& data_dir) {
+    std::vector<std::string> candidates;
+    if (!game_arg.empty()) candidates.push_back(game_arg);
+    else {
+        if (const char* base = SDL_GetBasePath()) candidates.push_back(std::string(base) + kExeName);
+        candidates.push_back(kExeName);
+        candidates.push_back(data_dir + kExeName);
+    }
+    for (const std::string& exe : candidates) {
+        SDL_PathInfo info;
+        if (SDL_GetPathInfo(exe.c_str(), &info) && info.type == SDL_PATHTYPE_FILE) return exe;
+    }
+    return "";
+}
+
 // The pak to run: --pak, else the cached one, else extracted now from the original exe.
 static std::string prepare_pak(const std::string& pak_arg, const std::string& game_arg, const std::string& data_dir,
                                bool headless) {
@@ -74,17 +96,7 @@ static std::string prepare_pak(const std::string& pak_arg, const std::string& ga
     std::string cached = data_dir + "toh.pak";
     if (game_arg.empty() && is_current_pak(cached)) return cached;
 
-    const char* exe_name = "Tower of Heaven.exe";
-    std::vector<std::string> candidates;
-    if (!game_arg.empty()) candidates.push_back(game_arg);
-    else {
-        if (const char* base = SDL_GetBasePath()) candidates.push_back(std::string(base) + exe_name);
-        candidates.push_back(exe_name);
-        candidates.push_back(data_dir + exe_name);
-    }
-    for (const std::string& exe : candidates) {
-        SDL_PathInfo info;
-        if (!SDL_GetPathInfo(exe.c_str(), &info) || info.type != SDL_PATHTYPE_FILE) continue;
+    if (std::string exe = find_exe(game_arg, data_dir); !exe.empty()) {
         std::fprintf(stderr, "extracting the game's data from %s...\n", exe.c_str());
         std::vector<uint8_t> pak;
         std::string err;
@@ -99,7 +111,7 @@ static std::string prepare_pak(const std::string& pak_arg, const std::string& ga
         return cached;
     }
     std::string where = SDL_GetBasePath() ? SDL_GetBasePath() : "";
-    fatal(std::string("This needs your copy of the original game.\n\nPut \"") + exe_name + "\" next to this program" +
+    fatal(std::string("This needs your copy of the original game.\n\nPut \"") + kExeName + "\" next to this program" +
               (where.empty() ? "" : " (" + where + ")") + ", or in " + data_dir + ", and start it again.",
           headless);
     return "";
@@ -176,6 +188,10 @@ int main(int argc, char** argv) {
     if (!game.init_video(headless >= 0)) { std::fprintf(stderr, "video/audio setup failed\n"); return 1; }
     pak = prepare_pak(pak, game_exe, data_dir, headless >= 0);
     if (pak.empty()) return 1;
+#ifdef __SWITCH__
+    if (std::string exe = find_exe(game_exe, data_dir); !exe.empty() && argc > 0)
+        toh_switch_install_icon(exe, argv[0], data_dir);
+#endif
     std::fprintf(stderr, "loading %s\n", pak.c_str());
     if (!game.load(pak)) { std::fprintf(stderr, "loading %s failed\n", pak.c_str()); return 1; }
     std::fprintf(stderr, "loaded; starting the game\n");

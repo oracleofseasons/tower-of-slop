@@ -14,9 +14,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <exception>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace {
@@ -33,7 +33,8 @@ bool fail(const char* msg) {
 // Everything written to stderr goes to sdmc:/switch/toh/toh.log. A crash writes its address and
 // a backtrace there (as offsets into toh.elf, for addr2line) and returns to the homebrew menu.
 
-extern "C" char __start__;   // the start of this module (libnx crt0)
+// crash addresses are given relative to SDL_Init; `nm toh.elf | grep SDL_Init` turns them into elf addresses
+static u64 anchor() { return reinterpret_cast<u64>(&SDL_Init); }
 
 static void open_log() {
     static bool open = false;
@@ -42,7 +43,18 @@ static void open_log() {
     mkdir("sdmc:/switch", 0777);
     mkdir(kDataDir, 0777);
     if (std::freopen("sdmc:/switch/toh/toh.log", "w", stderr)) std::setvbuf(stderr, nullptr, _IONBF, 0);
-    std::fprintf(stderr, "[switch] log open; module base %p\n", static_cast<void*>(&__start__));
+    std::fprintf(stderr, "[switch] log open; SDL_Init at %p\n", reinterpret_cast<void*>(anchor()));
+    std::set_terminate([] {
+        std::fprintf(stderr, "[switch] uncaught exception");
+        if (auto ex = std::current_exception()) {
+            try { std::rethrow_exception(ex); }
+            catch (const std::exception& e) { std::fprintf(stderr, ": %s", e.what()); }
+            catch (...) {}
+        }
+        std::fprintf(stderr, "\n");
+        std::fflush(stderr);
+        svcExitProcess();
+    });
 }
 
 extern "C" {
@@ -50,15 +62,15 @@ alignas(16) u8 __nx_exception_stack[0x10000];
 u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
 
 void __libnx_exception_handler(ThreadExceptionDump* ctx) {
-    const u64 base = reinterpret_cast<u64>(&__start__);
+    const u64 base = anchor();
     std::fprintf(stderr, "[switch] CRASH: error_desc %u, esr 0x%x\n", ctx->error_desc, ctx->esr);
-    std::fprintf(stderr, "[switch]   pc  0x%lx (toh.elf +0x%lx)\n", ctx->pc.x, ctx->pc.x - base);
-    std::fprintf(stderr, "[switch]   lr  0x%lx (toh.elf +0x%lx)\n", ctx->lr.x, ctx->lr.x - base);
+    std::fprintf(stderr, "[switch]   pc  0x%lx (SDL_Init%+ld)\n", ctx->pc.x, static_cast<long>(ctx->pc.x - base));
+    std::fprintf(stderr, "[switch]   lr  0x%lx (SDL_Init%+ld)\n", ctx->lr.x, static_cast<long>(ctx->lr.x - base));
     std::fprintf(stderr, "[switch]   far 0x%lx, sp 0x%lx\n", ctx->far.x, ctx->sp.x);
     u64 fp = ctx->fp.x;
     for (int i = 0; i < 32 && fp && (fp & 7) == 0; i++) {
         u64 ret = reinterpret_cast<u64*>(fp)[1];
-        std::fprintf(stderr, "[switch]   #%d 0x%lx (toh.elf +0x%lx)\n", i, ret, ret - base);
+        std::fprintf(stderr, "[switch]   #%d 0x%lx (SDL_Init%+ld)\n", i, ret, static_cast<long>(ret - base));
         u64 next = reinterpret_cast<u64*>(fp)[0];
         if (next <= fp) break;
         fp = next;
@@ -273,7 +285,11 @@ SDL_Renderer* SDL_CreateRenderer(SDL_Window* window, const char*) {
     return r;
 }
 
-bool SDL_SetRenderVSync(SDL_Renderer* r, int vsync) { return eglSwapInterval(r->display, vsync) == EGL_TRUE; }
+bool SDL_SetRenderVSync(SDL_Renderer* r, int vsync) {
+    bool ok = eglSwapInterval(r->display, vsync) == EGL_TRUE;
+    std::fprintf(stderr, "[switch] vsync %d: %s\n", vsync, ok ? "ok" : "failed");
+    return ok;
+}
 
 SDL_Texture* SDL_CreateTexture(SDL_Renderer*, SDL_PixelFormat, SDL_TextureAccess access, int w, int h) {
     auto* t = new SDL_Texture;
@@ -287,6 +303,7 @@ SDL_Texture* SDL_CreateTexture(SDL_Renderer*, SDL_PixelFormat, SDL_TextureAccess
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     if (access == SDL_TEXTUREACCESS_TARGET) {
+        std::fprintf(stderr, "[switch] render target %dx%d\n", w, h);
         glGenFramebuffers(1, &t->fbo);
         glBindFramebuffer(GL_FRAMEBUFFER, t->fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->tex, 0);
@@ -504,7 +521,7 @@ void mix(int16_t* out, uint32_t frames) {
         out[i] = static_cast<int16_t>(std::clamp(acc[i], -1.0f, 1.0f) * 32767.0f);
 }
 
-void audio_thread() {
+void audio_thread(void*) {
     AudioOutBuffer bufs[4]{};
     for (auto& b : bufs) {
         b.buffer = aligned_alloc(0x1000, kBufferFrames * 4);
@@ -526,11 +543,15 @@ void audio_thread() {
 }  // namespace
 
 SDL_AudioDeviceID SDL_OpenAudioDevice(SDL_AudioDeviceID, const SDL_AudioSpec*) {
-    if (R_FAILED(audoutInitialize()) || R_FAILED(audoutStartAudioOut())) {
-        fail("audout unavailable");
-        return 0;
-    }
-    std::thread(audio_thread).detach();
+    std::fprintf(stderr, "[switch] starting audout\n");
+    Result rc = audoutInitialize();
+    if (R_FAILED(rc)) { std::fprintf(stderr, "[switch] audoutInitialize: 0x%x\n", rc); return fail("audout unavailable"), 0; }
+    rc = audoutStartAudioOut();
+    if (R_FAILED(rc)) { std::fprintf(stderr, "[switch] audoutStartAudioOut: 0x%x\n", rc); return fail("audout unavailable"), 0; }
+    static Thread thread;
+    rc = threadCreate(&thread, audio_thread, nullptr, nullptr, 0x20000, 0x2B, -2);
+    if (R_SUCCEEDED(rc)) rc = threadStart(&thread);
+    if (R_FAILED(rc)) { std::fprintf(stderr, "[switch] audio thread: 0x%x\n", rc); return fail("no audio thread"), 0; }
     std::fprintf(stderr, "[switch] audio: %u Hz, %u channels\n", audoutGetSampleRate(), audoutGetChannelCount());
     return 1;
 }
