@@ -496,7 +496,24 @@ static std::string norm(std::string s) {
     return s;
 }
 
+static Value external_call_impl(Ctx& C, const Args& a);
+
+// TOH_TRACE_EXT=1 logs every DLL call and its result
 Value bi_external_call(Ctx& C, const Args& a) {
+    static const bool trace = std::getenv("TOH_TRACE_EXT") != nullptr;
+    Value r = external_call_impl(C, a);
+    if (trace) {
+        int id = I(a, 0);
+        std::string args;
+        for (size_t i = 1; i < a.size(); i++) args += (i > 1 ? ", " : "") + (a[i].is_str ? '"' + a[i].s + '"' : a[i].repr());
+        std::fprintf(stderr, "[ext] %s(%s) -> %s%s\n",
+                     id >= 0 && id < static_cast<int>(G(C).ext_names.size()) ? G(C).ext_names[id].c_str() : "?",
+                     args.c_str(), r.is_str ? "\"" : "", (r.repr() + (r.is_str ? "\"" : "")).c_str());
+    }
+    return r;
+}
+
+static Value external_call_impl(Ctx& C, const Args& a) {
     Game& g = G(C);
     int id = I(a, 0);
     if (id < 0 || id >= static_cast<int>(g.ext_names.size())) g.error("external_call: undefined function");
@@ -536,7 +553,10 @@ Value bi_external_call(Ctx& C, const Args& a) {
         return "1";
     }
     if (fn == "SS_SetSoundVol") {
-        s->vol = std::atof(S(a, 2).c_str()) / 10000.0;
+        // The DLL takes DirectSound attenuation in hundredths of a dB: 0 = full, -10000 = silent.
+        // (The GML wrapper SS_SetSoundVol maps the game's 0..10000 onto -10000..0.)
+        double db100 = std::min(0.0, std::atof(S(a, 2).c_str()));
+        s->vol = db100 <= -10000 ? 0.0 : std::pow(10.0, db100 / 2000.0);
         if (s->stream) SDL_SetAudioStreamGain(s->stream, static_cast<float>(s->vol));
         return "1";
     }
