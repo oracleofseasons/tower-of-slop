@@ -40,7 +40,7 @@ option(TOH_RELEASE "Portable release build (static libstdc++)" OFF)
 
 add_executable(toh
   runtime/main.cpp runtime/game.cpp runtime/render.cpp runtime/builtins.cpp runtime/value.cpp
-  runtime/interp.cpp runtime/extract.cpp ${GEN_DIR}/gml_functions.h ${GEN_DIR}/gml_names.inc)
+  runtime/interp.cpp runtime/extract.cpp runtime/settings.cpp ${GEN_DIR}/gml_functions.h ${GEN_DIR}/gml_names.inc)
 
 # OGG decoding (third_party/stb_vorbis, public domain / MIT)
 add_library(stb_vorbis STATIC third_party/stb_vorbis/stb_vorbis.c)

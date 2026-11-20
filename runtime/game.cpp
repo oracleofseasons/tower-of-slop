@@ -308,11 +308,13 @@ bool Game::load(const std::string& path) {
             std::string label = r.str();
             std::string oname = obj >= 0 && obj < static_cast<int>(objects.size()) && objects[obj] ? objects[obj]->name : "?";
             std::vector<Action> acts;
+            std::vector<std::pair<size_t, std::string>> code_src;   // action index -> GML
             uint32_t nacts = r.u32();
             for (uint32_t j = 0; j < nacts; j++) {
                 if (r.b()) {
                     int target = r.i32();
-                    acts.push_back(Action::code(interp.parse(r.str(), oname + " " + label + " action " + std::to_string(j)), target));
+                    code_src.push_back({acts.size(), r.str()});
+                    acts.push_back(Action::code(nullptr, target));
                 } else {
                     int lib = r.i32(), act = r.i32(), target = r.i32();
                     bool rel = r.b();
@@ -321,6 +323,14 @@ bool Game::load(const std::string& path) {
                     acts.push_back(Action::builtin(lib, act, target, rel, std::move(args)));
                 }
             }
+            // optional changes (settings.ini): our code before / after this event's code
+            for (const Hook& h : hooks) {
+                if (oname != h.object || type != h.type || number != h.number || code_src.empty()) continue;
+                if (h.before) code_src.front().second = std::string(h.before) + "\n" + code_src.front().second;
+                if (h.after) code_src.back().second += std::string("\n") + h.after;
+            }
+            for (size_t j = 0; j < code_src.size(); j++)
+                acts[code_src[j].first].fn = interp.parse(code_src[j].second, oname + " " + label + " action " + std::to_string(code_src[j].first));
             code.add_event(obj, type, number, std::move(acts));
         }
         uint32_t nroom = r.u32();

@@ -2,7 +2,7 @@
 // On first run the game's data is extracted from your copy of "Tower of Heaven.exe" (found with
 // --game, next to this program, in the current folder or in the data folder) and cached as toh.pak
 // in the data folder.
-//   toh [--game EXE] [--pak FILE] [--extract EXE OUT.pak] [--save-dir DIR] [--headless FRAMES] [--shot FILE.bmp] [--shot-every N DIR]
+//   toh [--game EXE] [--pak FILE] [--extract EXE OUT.pak] [--settings FILE] [--save-dir DIR] [--headless FRAMES] [--shot FILE.bmp] [--shot-every N DIR]
 //       [--room ID|NAME]   (start in that room instead of the first; for testing)
 //       [--record FILE]    (instrumented builds: save your key presses for tools/trace/compare.sh)
 //       [--warp ID|NAME]   (boot normally; the first entry into level_1 goes to this room instead)
@@ -10,6 +10,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <vector>
 #include <cstring>
@@ -47,6 +48,42 @@ static int vk_from_scancode(SDL_Scancode sc) {
 #ifdef __SWITCH__
 bool toh_switch_install_icon(const std::string& exe, const std::string& self_nro, const std::string& data_dir);
 #endif
+
+// Frame pacing. The game runs at its room speed (30); the screen is redrawn `refresh` times a
+// second. When the display's rate divided by the vsync interval is a whole multiple of the game's
+// speed, each game frame is shown for exactly that many vsynced presents (no judder); otherwise
+// frames are timed with a clock as before.
+struct Pacer {
+    double present_hz = 0;   // vsynced presents per second, 0 = not locked
+
+    void setup(Game& game, int refresh) {
+        // measure the display: time vsynced presents of a blank screen
+        SDL_SetRenderVSync(game.renderer, 1);
+        Uint64 t0 = 0;
+        const int warm = 6, count = 24;
+        for (int i = 0; i < warm + count; i++) {
+            if (i == warm) t0 = SDL_GetTicksNS();
+            game.present();
+        }
+        double hz = count * 1e9 / static_cast<double>(SDL_GetTicksNS() - t0);
+        if (hz < 24 || hz > 500) {
+            std::fprintf(stderr, "display rate unclear (%.1f Hz): frames timed by clock\n", hz);
+            return;
+        }
+        int interval = std::max(1, static_cast<int>(std::lround(hz / refresh)));
+        if (interval > 1 && !SDL_SetRenderVSync(game.renderer, interval)) interval = 1;
+        present_hz = hz / interval;
+        std::fprintf(stderr, "display %.1f Hz; redrawing at %.1f Hz (setting %d)\n", hz, present_hz, refresh);
+    }
+
+    // presents per game frame, or 0 to time frames by clock
+    int presents_per_frame(int speed) const {
+        if (present_hz <= 0) return 0;
+        double k = present_hz / speed;
+        long n = std::lround(k);
+        return n >= 1 && std::abs(k - static_cast<double>(n)) < 0.05 * static_cast<double>(n) ? static_cast<int>(n) : 0;
+    }
+};
 
 static bool is_current_pak(const std::string& path) {
     FILE* f = std::fopen(path.c_str(), "rb");
@@ -127,7 +164,7 @@ static void save_screen(Game& g, const std::string& path) {
 }
 
 int main(int argc, char** argv) {
-    std::string pak, game_exe, save_dir, shot, shot_dir, start_room, warp, record;
+    std::string pak, game_exe, settings_file, save_dir, shot, shot_dir, start_room, warp, record;
     long headless = -1, shot_every = 0;
     std::multimap<long, std::pair<int, long>> scripted_keys;
     for (int i = 1; i < argc; i++) {
@@ -135,6 +172,7 @@ int main(int argc, char** argv) {
         auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
         if (a == "--pak") pak = next();
         else if (a == "--game") game_exe = next();
+        else if (a == "--settings") settings_file = next();
         else if (a == "--extract") {
             std::string exe = next(), out = next();
             std::vector<uint8_t> data;
@@ -188,6 +226,20 @@ int main(int argc, char** argv) {
     if (!game.init_video(headless >= 0)) { std::fprintf(stderr, "video/audio setup failed\n"); return 1; }
     pak = prepare_pak(pak, game_exe, data_dir, headless >= 0);
     if (pak.empty()) return 1;
+    // settings.ini next to the program, else in the data folder; testing runs (headless) ignore it
+    Settings settings;
+    if (!settings_file.empty()) {
+        settings.load({settings_file});
+        if (settings.loaded_from.empty()) { std::fprintf(stderr, "cannot read %s\n", settings_file.c_str()); return 1; }
+        game.hooks = active_hooks(settings);
+    } else if (headless < 0) {
+        std::vector<std::string> paths;
+        if (const char* base = SDL_GetBasePath()) paths.push_back(std::string(base) + "settings.ini");
+        paths.push_back(data_dir + "settings.ini");
+        settings.load(paths);
+        if (!settings.loaded_from.empty()) std::fprintf(stderr, "settings from %s\n", settings.loaded_from.c_str());
+        game.hooks = active_hooks(settings);
+    }
 #ifdef __SWITCH__
     if (argc > 0) toh_switch_install_icon(find_exe(game_exe, data_dir), argv[0], data_dir);
 #endif
@@ -240,6 +292,8 @@ int main(int argc, char** argv) {
         game.key_event(vk, down);
     };
 
+    Pacer pacer;
+    if (headless < 0) pacer.setup(game, settings.refresh);
     Uint64 next_frame = SDL_GetTicksNS();
     std::map<int, long> scripted_release;
     while (!game.quit) {
@@ -281,7 +335,18 @@ int main(int argc, char** argv) {
         }
         game.present();
         int speed = game.room_state.speed > 0 ? game.room_state.speed : 30;
-        next_frame += 1000000000ull / speed;
+        Uint64 period = 1000000000ull / speed;
+        int hold = pacer.presents_per_frame(speed);
+        if (hold > 0) {
+            // locked to the display: show this frame for exactly `hold` vsynced presents
+            for (int p = 1; p < hold; p++) game.present();
+            // if vsync isn't blocking (a hidden window, say), don't run faster than the game
+            Uint64 now = SDL_GetTicksNS();
+            if (now < next_frame + period * 3 / 4) SDL_DelayNS(next_frame + period * 3 / 4 - now);
+            next_frame = SDL_GetTicksNS();
+            continue;
+        }
+        next_frame += period;
         Uint64 now = SDL_GetTicksNS();
         if (next_frame > now) SDL_DelayNS(next_frame - now);
         else if (now - next_frame > 250000000ull) next_frame = now;   // don't spiral after a stall

@@ -11,6 +11,7 @@
 
 #include "gml_runtime.h"
 #include "interp.h"
+#include "settings.h"
 
 namespace gml {
 
@@ -150,6 +151,7 @@ class Game {
     std::vector<int> room_order;
     CodeTable code;
     Interp interp;
+    std::vector<Hook> hooks;   // optional changes from settings.ini, applied at load
     std::map<int, std::vector<std::vector<int>>> holders;   // event type -> number -> object list (see fill_holders)
     std::map<std::pair<int, int>, std::vector<int>> event_holders;
     std::vector<bool> custom_draw;
