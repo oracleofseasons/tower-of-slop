@@ -150,9 +150,11 @@ int main(int argc, char** argv) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) game.quit = true;
-            if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
+            if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) {
                 int vk = vk_from_scancode(e.key.scancode);
                 bool down = e.type == SDL_EVENT_KEY_DOWN;
+                // a repeat only matters for a key a room change cleared (see Game::load_room)
+                if (e.key.repeat && (vk < 0 || vk > 255 || game.key_held[vk])) continue;
                 apply_key(vk, down);
             }
         }

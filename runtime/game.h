@@ -119,6 +119,7 @@ class InstanceList {
 
     Instance* insert(std::unique_ptr<Instance> inst);
     void draw_sort();
+    void move_to_end(const std::vector<Instance*>& woken);
     void refresh_maps();
     void remove_deleted();
     std::vector<Instance*> snapshot_object(int obj) const;      // exact object, active, insertion order

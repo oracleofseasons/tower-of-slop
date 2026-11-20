@@ -3,6 +3,7 @@
 #include "game.h"
 
 #include <algorithm>
+#include <unordered_set>
 #include <cstring>
 #include <fstream>
 
@@ -208,6 +209,17 @@ Instance* InstanceList::insert(std::unique_ptr<Instance> inst) {
 void InstanceList::draw_sort() {
     std::stable_sort(draw_order.begin(), draw_order.end(),
                      [](const Instance* a, const Instance* b) { return a->depth > b->depth; });
+}
+
+// GM7 takes deactivated instances out of the instance list and appends them again, in their
+// old order, when they are activated; the next depth sort settles them among equal depths
+// after the instances that stayed active. Verified against the original (the pause menu:
+// obj_scale is reactivated after the new obj_exitmenu, and on resume the whole room is
+// reactivated behind obj_scale).
+void InstanceList::move_to_end(const std::vector<Instance*>& woken) {
+    if (woken.empty()) return;
+    std::unordered_set<Instance*> set(woken.begin(), woken.end());
+    std::stable_partition(draw_order.begin(), draw_order.end(), [&](Instance* p) { return !set.count(p); });
 }
 
 void InstanceList::refresh_maps() {
@@ -541,6 +553,17 @@ void Game::load_room(int id) {
 
     run_other_event(5);   // room end
     scene_change.reset();
+
+    // GM7 forgets held keys on a room change: a key held through the load reads as up until it
+    // is pressed again. Verified against the original (Right held across a death restart in
+    // level_7: the player stays put). With a real keyboard, Windows key-repeat re-sends the key
+    // down shortly after; main.cpp lets SDL repeat events do the same. A keyboard_key_press
+    // made in the frame that changed room is lost too (verified: a press in the last frame
+    // before a restart has no effect in the new room).
+    simulated_keys.clear();
+    std::fill(std::begin(key_held), std::end(key_held), false);
+    std::fill(std::begin(key_pressed), std::end(key_pressed), false);
+    std::fill(std::begin(key_released), std::end(key_released), false);
 
     // persistent instances survive the change
     std::vector<std::unique_ptr<Instance>> keep;

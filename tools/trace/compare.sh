@@ -29,7 +29,7 @@ tr -d '\r' < "$OUT/game/trace.txt" > "$OUT/orig.txt"
 FRAMES=$(wc -l < "$OUT/orig.txt")
 
 mkdir -p "$OUT/portsave"
-"$ROOT/build-trace/toh" --pak "$ROOT/build-trace/toh.pak" --save-dir "$OUT/portsave" --headless "$((FRAMES + 5))" \
+"$ROOT/build-trace/toh" --pak "$ROOT/build-trace/toh.pak" --save-dir "$OUT/portsave" --headless "$((FRAMES + 600))" \
     2>"$OUT/port.log" || true
 tr -d '\r' < "$OUT/portsave/trace.txt" | head -n "$FRAMES" > "$OUT/port.txt"
 

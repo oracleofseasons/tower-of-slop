@@ -120,7 +120,10 @@ Value bi_instance_deactivate_all(Ctx& C, const Args& a) {
 
 Value bi_instance_activate_all(Ctx& C, const Args&) {
     Game& g = G(C);
-    for (Instance* p : g.list.draw_order) if (p->state == State::Inactive) p->state = State::Active;
+    std::vector<Instance*> woken;
+    for (Instance* p : g.list.draw_order)
+        if (p->state == State::Inactive) { p->state = State::Active; woken.push_back(p); }
+    g.list.move_to_end(woken);
     g.list.refresh_maps();
     return Value();
 }
@@ -128,11 +131,13 @@ Value bi_instance_activate_all(Ctx& C, const Args&) {
 Value bi_instance_activate_object(Ctx& C, const Args& a) {
     Game& g = G(C);
     int obj = I(a, 0);
+    std::vector<Instance*> woken;
     for (Instance* p : g.list.draw_order) {
         if (p->state != State::Inactive) continue;
         bool match = obj == -3 || (obj >= 100000 ? p->id == obj : std::find(p->parents.begin(), p->parents.end(), obj) != p->parents.end());
-        if (match) p->state = State::Active;
+        if (match) { p->state = State::Active; woken.push_back(p); }
     }
+    g.list.move_to_end(woken);
     g.list.refresh_maps();
     return Value();
 }
