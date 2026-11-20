@@ -62,8 +62,10 @@ def main():
     ap.add_argument('--project', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--seed', type=int, default=1)
-    ap.add_argument('--keys', default='')
+    ap.add_argument('--keys', default='', help='"frame:vk[:frames],..." or @file')
     a = ap.parse_args()
+    if a.keys.startswith('@'):
+        a.keys = open(a.keys[1:]).read().strip()
 
     create, begin, end = gml(a.seed, key_schedule(a.keys))
     edits = {'create_0.gml': lambda s: create + s, 'begin_step.gml': lambda s: begin + s,

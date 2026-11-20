@@ -34,6 +34,13 @@ scripted-input GML into a copy of the original exe and into the port, runs the o
 Wine and the port headless, and diffs a per-frame trace of room, player position and the
 ordered instance list. Your original exe is not modified.
 
+To check a real playthrough, record one and replay it:
+
+```sh
+tools/trace/record.sh my-run.keys        # play normally; quit when done
+tools/trace/compare.sh @my-run.keys      # replays it in the original under Wine and in the port
+```
+
 ## How it works
 
 1. `tools/transpiler/gml2cpp.py` turns every piece of the game's GML into a C++ function.

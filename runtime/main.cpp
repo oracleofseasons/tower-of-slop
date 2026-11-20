@@ -1,11 +1,14 @@
 // Entry point: window, input, frame timing.
 //   toh [--pak FILE] [--save-dir DIR] [--headless FRAMES] [--shot FILE.bmp] [--shot-every N DIR]
 //       [--room ID|NAME]   (start in that room instead of the first; for testing)
+//       [--record FILE]    (instrumented builds: save your key presses for tools/trace/compare.sh)
 //       [--warp ID|NAME]   (boot normally; the first entry into level_1 goes to this room instead)
 //       [--keys "frame:KEY[:FRAMES],..."]   (headless input, KEY = GM vk code, held FRAMES, default 1)
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdlib>
+#include <vector>
 #include <cstring>
 #include <map>
 #include <string>
@@ -47,7 +50,7 @@ static void save_screen(Game& g, const std::string& path) {
 }
 
 int main(int argc, char** argv) {
-    std::string pak = "toh.pak", save_dir, shot, shot_dir, start_room, warp;
+    std::string pak = "toh.pak", save_dir, shot, shot_dir, start_room, warp, record;
     long headless = -1, shot_every = 0;
     std::multimap<long, std::pair<int, long>> scripted_keys;
     for (int i = 1; i < argc; i++) {
@@ -59,6 +62,7 @@ int main(int argc, char** argv) {
         else if (a == "--shot") shot = next();
         else if (a == "--room") start_room = next();
         else if (a == "--warp") warp = next();
+        else if (a == "--record") record = next();
         else if (a == "--shot-every") { shot_every = std::atol(next().c_str()); shot_dir = next(); }
         else if (a == "--keys") {
             std::string spec = next();
@@ -110,6 +114,36 @@ int main(int argc, char** argv) {
         game.start();
     }
 
+    // Recording: a key change applied at the poll before frame G must be replayed by the
+    // instrumented GML's keyboard_key_press during frame G-1, whose begin step sees the trace
+    // counter's value at the start of G-1. So each event is stamped with that value.
+    int trace_var = -1;
+    for (int i = 0; i < V__COUNT; i++) if (std::string(USER_VAR_NAMES[i]) == "__trace_f") trace_var = i;
+    if (!record.empty() && trace_var < 0) {
+        std::fprintf(stderr, "--record needs an instrumented build (tools/trace/record.sh)\n");
+        return 2;
+    }
+    auto trace_counter = [&]() -> long {
+        auto it = game.globals.find(trace_var);
+        if (it == game.globals.end() || !it->second.has(0)) return -1;
+        return static_cast<long>(it->second.v.at(0).real());
+    };
+    long counter_start = -1;
+    struct Rec { long f; int vk; bool down; };
+    std::vector<Rec> recorded;
+    int unreplayable = 0;
+
+    auto apply_key = [&](int vk, bool down) {
+        if (vk < 0 || vk > 255) return;
+        if (!record.empty() && game.key_held[vk] != down) {
+            // polled before frame G: counter_start is G-1's starting value; if the logger didn't
+            // run during G-1 (no host on a transition frame), the injected code can't replay it
+            if (counter_start < 0 || trace_counter() == counter_start) unreplayable++;
+            else recorded.push_back({counter_start, vk, down});
+        }
+        game.key_event(vk, down);
+    };
+
     Uint64 next_frame = SDL_GetTicksNS();
     std::map<int, long> scripted_release;
     while (!game.quit) {
@@ -117,7 +151,9 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) game.quit = true;
             if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
-                game.key_event(vk_from_scancode(e.key.scancode), e.type == SDL_EVENT_KEY_DOWN);
+                int vk = vk_from_scancode(e.key.scancode);
+                bool down = e.type == SDL_EVENT_KEY_DOWN;
+                apply_key(vk, down);
             }
         }
         for (auto [vk, down] : game.simulated_keys) game.key_event(vk, down);
@@ -125,17 +161,17 @@ int main(int argc, char** argv) {
         if (headless >= 0) {
             long f = static_cast<long>(game.frame_count);
             for (auto it = scripted_release.begin(); it != scripted_release.end();) {
-                if (it->second <= f) { game.key_held[it->first] = false; game.key_released[it->first] = true; it = scripted_release.erase(it); }
+                if (it->second <= f) { apply_key(it->first, false); it = scripted_release.erase(it); }
                 else ++it;
             }
             auto range = scripted_keys.equal_range(f);
             for (auto it = range.first; it != range.second; ++it) {
-                game.key_held[it->second.first] = true;
-                game.key_pressed[it->second.first] = true;
+                apply_key(it->second.first, true);
                 scripted_release[it->second.first] = f + it->second.second;
             }
         }
 
+        counter_start = trace_counter();
         game.frame();
         game.update_audio();
 
@@ -153,6 +189,22 @@ int main(int argc, char** argv) {
         else if (now - next_frame > 250000000ull) next_frame = now;   // don't spiral after a stall
     }
     if (!shot.empty()) save_screen(game, shot);
+    if (!record.empty()) {
+        // pair presses with releases: "frame:vk:frames,..."
+        std::string out;
+        size_t pairs = 0;
+        for (size_t i = 0; i < recorded.size(); i++) {
+            if (!recorded[i].down) continue;
+            long dur = 1000000;
+            for (size_t j = i + 1; j < recorded.size(); j++)
+                if (recorded[j].vk == recorded[i].vk && !recorded[j].down) { dur = std::max(1L, recorded[j].f - recorded[i].f); break; }
+            out += (pairs++ ? "," : "") + std::to_string(recorded[i].f) + ":" + std::to_string(recorded[i].vk) + ":" + std::to_string(dur);
+        }
+        if (FILE* f = std::fopen(record.c_str(), "w")) { std::fputs(out.c_str(), f); std::fputc('\n', f); std::fclose(f); }
+        std::fprintf(stderr, "recorded %zu key presses to %s", pairs, record.c_str());
+        if (unreplayable) std::fprintf(stderr, " (%d events fell on transition frames and were dropped)", unreplayable);
+        std::fprintf(stderr, "\n");
+    }
     SDL_Quit();
     return 0;
 }
