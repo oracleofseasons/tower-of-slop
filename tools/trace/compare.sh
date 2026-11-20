@@ -15,7 +15,8 @@ case "$KEYS" in @*) KEYTEXT="$(cat "${KEYS#@}")" ;; *) KEYTEXT="$KEYS" ;; esac
 LAST=$(printf "%s" "$KEYTEXT" | tr ',' '\n' | cut -d: -f1 | sort -n | tail -1)
 SECS="${3:-$(( ${LAST:-0} / 30 + 20 ))}"
 OUT="$ROOT/build-trace/run"
-rm -rf "$OUT"
+rm -rf "$OUT/game" "$OUT/portsave"
+echo "building the instrumented original and port..."
 python3 -I "$ROOT/tools/trace/instrument.py" --exe "$ROOT/original/windows/Tower of Heaven.exe" \
     --project "$ROOT/extracted/project" --out "$OUT" --seed "$SEED" --keys "$KEYTEXT"
 cmake -S "$ROOT" -B "$ROOT/build-trace" -DPROJECT_DIR="$OUT/project" >/dev/null

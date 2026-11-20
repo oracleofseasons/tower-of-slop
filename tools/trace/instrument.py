@@ -72,18 +72,27 @@ def main():
              'end_step.gml': lambda s: s + end}
 
     # port: patched copy of the project
+    # Only rewrite files whose contents change, so the port isn't recompiled needlessly.
     pdst = os.path.join(a.out, 'project')
-    if os.path.exists(pdst):
-        shutil.rmtree(pdst)
-    shutil.copytree(a.project, pdst)
+    wanted = {}
+    for root, _, files in os.walk(a.project):
+        for fn in files:
+            src = os.path.join(root, fn)
+            wanted[os.path.relpath(src, a.project)] = open(src, 'rb').read()
     patches = []
     for host in HOSTS:
         for fname, fn in edits.items():
-            path = os.path.join(pdst, 'objects', host, fname)
-            old = open(path, encoding='latin-1', newline='').read()
+            rel = os.path.join('objects', host, fname)
+            old = wanted[rel].decode('latin-1')
             new = fn(old)
-            open(path, 'w', encoding='latin-1', newline='').write(new)
+            wanted[rel] = new.encode('latin-1')
             patches.append((old, new))
+    for rel, data in wanted.items():
+        path = os.path.join(pdst, rel)
+        if os.path.exists(path) and open(path, 'rb').read() == data:
+            continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, 'wb').write(data)
 
     # original: splice the same code into the exe
     d = open(a.exe, 'rb').read()
