@@ -9,4 +9,5 @@ tools/.venv/
 
 # Build output
 build/
+build-trace/
 __pycache__/

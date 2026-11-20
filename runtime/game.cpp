@@ -194,6 +194,8 @@ bool Game::load(const std::string& path) {
 
 // ================================================================== instance list (instancelist.rs)
 
+// New instances are appended (as in OpenGMK). The list is depth-sorted before each draw and,
+// in GM 7.0, also at the end of loading a room (see load_room). Verified against the original.
 Instance* InstanceList::insert(std::unique_ptr<Instance> inst) {
     Instance* p = inst.get();
     storage.push_back(std::move(inst));
@@ -212,7 +214,7 @@ void InstanceList::refresh_maps() {
     by_object.clear();
     by_identity.clear();
     for (Instance* p : draw_order) {
-        if (!p->alive()) continue;
+        if (p->state == State::Inactive) continue;
         by_object[p->object_index].push_back(p);
         for (int parent : p->parents) by_identity[parent].push_back(p);
     }
@@ -442,6 +444,13 @@ void Game::run_collisions() {
 
 // ================================================================== frame (game.rs Game::frame)
 
+void Game::key_event(int vk, bool down) {
+    if (vk < 0 || vk > 255) return;
+    if (down && !key_held[vk]) key_pressed[vk] = true;
+    if (!down && key_held[vk]) key_released[vk] = true;
+    key_held[vk] = down;
+}
+
 void Game::frame() {
     frame_count++;
     for (Instance* inst : list.snapshot_active()) { inst->xprevious = inst->x; inst->yprevious = inst->y; }
@@ -552,15 +561,19 @@ void Game::load_room(int id) {
     std::memset(key_pressed, 0, sizeof key_pressed);
     std::memset(key_released, 0, sizeof key_released);
 
+    // As OpenGMK load_room: room instances are created first; then each persistent instance is
+    // re-inserted, marking any room instance with the same id as deleted (no events run for it,
+    // but it still counts in instance_count until the end-of-frame cleanup).
     std::vector<std::pair<Instance*, int>> fresh;
     for (auto& ri : room_state.instances) {
-        bool exists = false;
-        for (auto& k : keep) exists |= k->id == ri.id;
-        if (exists) continue;
+        if (list.by_id(ri.id)) continue;
         fresh.push_back({list.insert(std::make_unique<Instance>(make_instance(*this, ri.x, ri.y, ri.object, ri.id))),
                          ri.id});
     }
-    for (auto& k : keep) list.insert(std::move(k));
+    for (auto& k : keep) {
+        if (Instance* dup = list.by_id(k->id)) dup->state = State::Deleted;
+        list.insert(std::move(k));
+    }
 
     for (auto [inst, rid] : fresh) {
         if (!inst->alive()) continue;
@@ -578,6 +591,10 @@ void Game::load_room(int id) {
         run_code(rc->second, &dummy, &dummy);
     }
     run_other_event(4);   // room start
+    // GM 7.0 sorts the instance list once the room is set up: on the first frame of a room,
+    // persistent and create-event instances already sit in depth order (OpenGMK doesn't do this).
+    list.draw_sort();
+    list.refresh_maps();
 }
 
 void Game::start() {
@@ -906,6 +923,17 @@ Value Game::get_builtin(Ctx& C, Instance* in, BV b, const Idx& idx) {
     case BV::background_hspeed:
         if (n < 0 || n >= static_cast<int>(room_state.bgs.size())) error("background index out of range");
         return room_state.bgs[n].hspeed;
+    case BV::instance_count: {
+        int c = 0;
+        for (Instance* p : list.draw_order) c += p->state != State::Inactive;
+        return c;
+    }
+    case BV::instance_id: {   // instance_at: nth non-inactive instance in draw order
+        int k = 0;
+        for (Instance* p : list.draw_order)
+            if (p->state != State::Inactive && k++ == n) return p->id;
+        return -4;
+    }
     }
     (void)C;
     return Value();
@@ -963,6 +991,7 @@ void Game::set_builtin(Ctx& C, Instance* in, BV b, const Idx& idx, const Value& 
         room_state.bgs[n].hspeed = r;
         return;
     case BV::image_number: case BV::id: case BV::object_index: case BV::room_width: case BV::room_height:
+    case BV::instance_count: case BV::instance_id:
         error("cannot assign to read-only variable");
     }
     (void)C;

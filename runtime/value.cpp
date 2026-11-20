@@ -5,8 +5,6 @@
 
 namespace gml {
 
-static constexpr double CMP_EPSILON = 1e-13;
-
 double gm_round(double v) {
     double i = std::floor(v);
     double diff = v - i;
@@ -75,12 +73,14 @@ REAL_OP(bxor, "^", static_cast<double>(to_u64(gm_round(l)) ^ to_u64(gm_round(r))
 REAL_OP(shl, "<<", static_cast<double>(to_u64(gm_round(l)) << (static_cast<int8_t>(gm_round(r)) & 63)))
 REAL_OP(shr, ">>", static_cast<double>(to_u64(gm_round(l)) >> (static_cast<int8_t>(gm_round(r)) & 63)))
 
-// Comparisons: reals use an epsilon, strings compare bytes, mixed types are an error
-// (OpenGMK gml_cmp_impl).
+// Comparisons: strings compare bytes, mixed types are an error (OpenGMK gml_cmp_impl).
+// Reals compare EXACTLY: GM 8 added a 1e-13 epsilon (which OpenGMK implements), but GM 7.0
+// has none. Verified against the original exe: the logo fade (alpha += .025 until > 1.5)
+// leaves room_logo on frame 241 under exact comparison and 244 with the epsilon.
 #define CMP_OP(name, sym, rexpr, sexpr)                                    \
     Value op_##name(Pair p) {                                              \
         if (!p.a.is_str && !p.b.is_str) {                                  \
-            double diff = p.a.r - p.b.r;                                   \
+            double l = p.a.r, r = p.b.r;                                   \
             return Value(static_cast<bool>(rexpr));                        \
         }                                                                  \
         if (p.a.is_str && p.b.is_str) {                                    \
@@ -90,13 +90,12 @@ REAL_OP(shr, ">>", static_cast<double>(to_u64(gm_round(l)) >> (static_cast<int8_
         bad(sym, p.a, p.b);                                                \
     }
 
-CMP_OP(eq, "==", std::fabs(diff) < CMP_EPSILON, c == 0)
-CMP_OP(ne, "!=", std::fabs(diff) >= CMP_EPSILON, c != 0)
-CMP_OP(lt, "<", diff <= -CMP_EPSILON, c < 0)
-CMP_OP(le, "<=", diff < CMP_EPSILON, c <= 0)
-CMP_OP(gt, ">", diff >= CMP_EPSILON, c > 0)
-CMP_OP(ge, ">=", diff > -CMP_EPSILON, c >= 0)
-
+CMP_OP(eq, "==", l == r, c == 0)
+CMP_OP(ne, "!=", l != r, c != 0)
+CMP_OP(lt, "<", l < r, c < 0)
+CMP_OP(le, "<=", l <= r, c <= 0)
+CMP_OP(gt, ">", l > r, c > 0)
+CMP_OP(ge, ">=", l >= r, c >= 0)
 Value op_and(Pair p) { return Value(truthy(p.a) && truthy(p.b)); }
 Value op_or(Pair p) { return Value(truthy(p.a) || truthy(p.b)); }
 Value op_xor(Pair p) { return Value(truthy(p.a) != truthy(p.b)); }

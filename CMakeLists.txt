@@ -11,7 +11,7 @@ find_package(SDL3 REQUIRED CONFIG)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # The game's code and assets come from your own copy of the game: run tools/extract.sh first.
-set(PROJECT_DIR ${CMAKE_SOURCE_DIR}/extracted/project)
+set(PROJECT_DIR ${CMAKE_SOURCE_DIR}/extracted/project CACHE PATH "Extracted (or instrumented) game project")
 set(GEN_DIR ${CMAKE_BINARY_DIR}/gen)
 file(GLOB_RECURSE GML_SOURCES CONFIGURE_DEPENDS ${PROJECT_DIR}/*.gml ${PROJECT_DIR}/*.json)
 

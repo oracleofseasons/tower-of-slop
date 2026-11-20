@@ -115,6 +115,7 @@ class InstanceList {
     std::vector<std::unique_ptr<Instance>> storage;
     std::vector<Instance*> draw_order;
     std::unordered_map<int, std::vector<Instance*>> by_object, by_identity;
+    long draw_cursor = -1;   // index of the instance being drawn, or -1 outside the draw loop
 
     Instance* insert(std::unique_ptr<Instance> inst);
     void draw_sort();
@@ -168,6 +169,8 @@ class Game {
 
     // input (GM virtual key codes)
     bool key_held[256] = {}, key_pressed[256] = {}, key_released[256] = {};
+    std::vector<std::pair<int, bool>> simulated_keys;   // keyboard_key_press/release: delivered at the next poll
+    void key_event(int vk, bool down);
 
     // drawing state
     SDL_Window* window = nullptr;

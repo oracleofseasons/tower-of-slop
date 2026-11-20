@@ -27,6 +27,13 @@ To run without a window (for testing), use `--headless FRAMES --shot-every N DIR
 This runs N frames deterministically, saves screenshots, and feeds scripted key presses.
 `--warp ROOM` boots normally and swaps the first entry into level 1 for ROOM (select New Game with `--keys 330:88`).
 
+## Checking against the original
+
+`tools/trace/compare.sh "330:88,1350:39:25" [SEED] [SECONDS]` injects the same tracing and
+scripted-input GML into a copy of the original exe and into the port, runs the original under
+Wine and the port headless, and diffs a per-frame trace of room, player position and the
+ordered instance list. Your original exe is not modified.
+
 ## How it works
 
 1. `tools/transpiler/gml2cpp.py` turns every piece of the game's GML into a C++ function.

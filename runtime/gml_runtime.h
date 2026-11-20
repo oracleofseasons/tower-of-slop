@@ -67,7 +67,7 @@ enum class BV {
     gravity, gravity_direction, sprite_index, image_index, image_speed, image_xscale, image_yscale,
     image_angle, image_alpha, image_blend, image_number, mask_index, depth, visible, solid,
     persistent, alarm, id, object_index, room, room_width, room_height, room_speed,
-    view_xview, view_yview, view_wview, view_hview, background_hspeed,
+    view_xview, view_yview, view_wview, view_hview, background_hspeed, instance_count, instance_id,
 };
 
 enum class State : uint8_t { Active, Inactive, Deleted };
@@ -125,20 +125,20 @@ struct Field {
 
 // A resolved variable reference: generated code does Ref::xxx(...).get(idx) / .set(idx, v)
 struct Ref {
-    enum Kind { Local, Arg, ArgArr, Builtin, Global, Self, Deref } kind;
+    enum Kind { Local, Arg, ArgArr, Builtin, Global, Self, Deref } kind = Local;
     Ctx* C = nullptr;
     Slot* slot = nullptr;
     int id = 0;
     Value target;
     Field field{false, 0};
 
-    static Ref local(Slot& s) { Ref r{Local}; r.slot = &s; return r; }
-    static Ref arg(Ctx& c, int n) { Ref r{Arg}; r.C = &c; r.id = n; return r; }
-    static Ref argarr(Ctx& c) { Ref r{ArgArr}; r.C = &c; return r; }
-    static Ref builtin(Ctx& c, BV b) { Ref r{Builtin}; r.C = &c; r.id = static_cast<int>(b); return r; }
-    static Ref global(Ctx& c, int v) { Ref r{Global}; r.C = &c; r.id = v; return r; }
-    static Ref self(Ctx& c, int v) { Ref r{Self}; r.C = &c; r.id = v; return r; }
-    static Ref deref(Ctx& c, Value t, Field f) { Ref r{Deref}; r.C = &c; r.target = std::move(t); r.field = f; return r; }
+    static Ref local(Slot& s) { Ref r; r.kind = Local; r.slot = &s; return r; }
+    static Ref arg(Ctx& c, int n) { Ref r; r.kind = Arg; r.C = &c; r.id = n; return r; }
+    static Ref argarr(Ctx& c) { Ref r; r.kind = ArgArr; r.C = &c; return r; }
+    static Ref builtin(Ctx& c, BV b) { Ref r; r.kind = Builtin; r.C = &c; r.id = static_cast<int>(b); return r; }
+    static Ref global(Ctx& c, int v) { Ref r; r.kind = Global; r.C = &c; r.id = v; return r; }
+    static Ref self(Ctx& c, int v) { Ref r; r.kind = Self; r.C = &c; r.id = v; return r; }
+    static Ref deref(Ctx& c, Value t, Field f) { Ref r; r.kind = Deref; r.C = &c; r.target = std::move(t); r.field = f; return r; }
 
     Value get(Idx idx) const;
     void set(Idx idx, Value v) const;

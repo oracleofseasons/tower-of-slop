@@ -117,14 +117,11 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) game.quit = true;
             if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
-                int vk = vk_from_scancode(e.key.scancode);
-                if (vk < 0) continue;
-                bool down = e.type == SDL_EVENT_KEY_DOWN;
-                if (down && !game.key_held[vk]) game.key_pressed[vk] = true;
-                if (!down && game.key_held[vk]) game.key_released[vk] = true;
-                game.key_held[vk] = down;
+                game.key_event(vk_from_scancode(e.key.scancode), e.type == SDL_EVENT_KEY_DOWN);
             }
         }
+        for (auto [vk, down] : game.simulated_keys) game.key_event(vk, down);
+        game.simulated_keys.clear();
         if (headless >= 0) {
             long f = static_cast<long>(game.frame_count);
             for (auto it = scripted_release.begin(); it != scripted_release.end();) {

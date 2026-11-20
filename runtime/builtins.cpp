@@ -34,6 +34,18 @@ Value bi_real(Ctx&, const Args& a) {
     if (a.empty() || !a[0].is_str) return a.empty() ? Value() : a[0];
     return std::atof(a[0].s.c_str());
 }
+Value bi_random_set_seed(Ctx& C, const Args& a) { G(C).rng = static_cast<uint32_t>(I(a, 0)); return Value(); }
+
+Value bi_string_format(Ctx&, const Args& a) {
+    if (a.empty() || a[0].is_str) return a.empty() ? Value("") : a[0];
+    int tot = std::max(0, I(a, 1)), dec = std::min(18, I(a, 2));
+    double x = a[0].r;
+    if (dec < 0) { double p = std::pow(10.0, -dec); x = gm_round(x / p) * p; dec = 18; }
+    char buf[128];
+    std::snprintf(buf, sizeof buf, "%*.*f", tot, dec, x);
+    return std::string(buf);
+}
+
 Value bi_ord(Ctx&, const Args& a) {
     std::string s = S(a, 0);
     return s.empty() ? 0.0 : static_cast<double>(static_cast<uint8_t>(s[0]));
@@ -206,6 +218,9 @@ Value bi_variable_global_exists(Ctx& C, const Args& a) {
 }
 
 // ------------------------------------------------------------------ input
+
+Value bi_keyboard_key_press(Ctx& C, const Args& a) { G(C).simulated_keys.push_back({I(a, 0), true}); return Value(); }
+Value bi_keyboard_key_release(Ctx& C, const Args& a) { G(C).simulated_keys.push_back({I(a, 0), false}); return Value(); }
 
 Value bi_keyboard_check(Ctx& C, const Args& a) { int k = I(a, 0); return k >= 0 && k < 256 && G(C).key_held[k]; }
 Value bi_keyboard_check_pressed(Ctx& C, const Args& a) { int k = I(a, 0); return k >= 0 && k < 256 && G(C).key_pressed[k]; }
@@ -601,6 +616,13 @@ static TextFile* tfile(Ctx& C, const Args& a) {
 
 Value bi_file_text_open_read(Ctx& C, const Args& a) { return open_file(C, S(a, 0), false); }
 Value bi_file_text_open_write(Ctx& C, const Args& a) { return open_file(C, S(a, 0), true); }
+Value bi_file_text_open_append(Ctx& C, const Args& a) {
+    Game& g = G(C);
+    FILE* f = std::fopen(file_path(g, S(a, 0)).c_str(), "ab");
+    if (!f) return -1;
+    g.files.push_back({f, true});
+    return static_cast<int>(g.files.size() - 1);
+}
 
 Value bi_file_text_close(Ctx& C, const Args& a) {
     if (TextFile* t = tfile(C, a)) { std::fclose(t->f); t->f = nullptr; }

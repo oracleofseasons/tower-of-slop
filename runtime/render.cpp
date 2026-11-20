@@ -144,6 +144,7 @@ struct LineIter {
     size_t pos = 0;
     std::string word;
     int word_w = 0;
+    LineIter(const std::string& t, const Font& f, int mw) : text(t), font(f), max_width(mw) {}
 
     bool next(std::string& line, int& line_w) {
         if (pos >= text.size()) return false;
@@ -273,8 +274,9 @@ void Game::draw_view(const View& v) {
         if (b.visible && !b.foreground)
             draw_background_tiled(b.bg, b.x, b.y, b.xscale, b.yscale, b.tile_h, b.tile_v, 0xFFFFFF, 1.0, end_x, end_y);
 
+    // Walk the live instance list: an instance created during a draw event is appended, and
+    // GM 7.0 draws it at the end of the same pass (verified: obj_mainmenu's first frame).
     list.draw_sort();
-    std::vector<Instance*> insts = list.snapshot_active();
     std::vector<Tile*> ts;
     for (auto& t : tiles) ts.push_back(&t);
     std::stable_sort(ts.begin(), ts.end(), [](Tile* a, Tile* b) { return a->depth > b->depth; });
@@ -288,13 +290,18 @@ void Game::draw_view(const View& v) {
         draw_texture(bg_texture(*backgrounds[t->bg]), t->tile_x, t->tile_y, t->w, t->h, t->x, t->y, 0, 0, 1, 1, 0,
                      0xFFFFFF, 1.0);
     };
-    size_t ii = 0, ti = 0;
-    while (ii < insts.size() || ti < ts.size()) {
-        if (ti >= ts.size()) draw_inst(insts[ii++]);
-        else if (ii >= insts.size()) draw_tile(ts[ti++]);
-        else if (insts[ii]->depth < ts[ti]->depth) draw_tile(ts[ti++]);
-        else draw_inst(insts[ii++]);
+    size_t ti = 0;
+    list.draw_cursor = 0;
+    for (;;) {
+        auto& order = list.draw_order;
+        long& ii = list.draw_cursor;
+        bool have_inst = ii < static_cast<long>(order.size());
+        if (!have_inst && ti >= ts.size()) break;
+        if (!have_inst) draw_tile(ts[ti++]);
+        else if (ti < ts.size() && order[ii]->depth < ts[ti]->depth) draw_tile(ts[ti++]);
+        else { Instance* inst = order[ii]; ii++; draw_inst(inst); }
     }
+    list.draw_cursor = -1;
 
     for (auto& b : room_state.bgs)
         if (b.visible && b.foreground)
