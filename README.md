@@ -37,15 +37,18 @@ ordered instance list. Your original exe is not modified.
 To check a real playthrough, record one and replay it:
 
 ```sh
-tools/trace/record.sh my-run.keys        # play normally; quit when done
-tools/trace/compare.sh @my-run.keys      # replays it in the original under Wine and in the port
+tools/trace/record.sh --original my-run.keys   # play the original under Wine; quit when done
+tools/trace/record.sh my-run.keys              # or play the port
+tools/trace/compare.sh @my-run.keys            # replays it in the original under Wine and in the port
 ```
+
+Keep the Wine window focused while the original runs: losing focus drops keys.
 
 ## How it works
 
-1. `tools/transpiler/gml2cpp.py` turns every piece of the game's GML into a C++ function.
-   Its lexer and parser copy OpenGMK's, so GML's quirks are kept.
-2. `tools/pack/pack.py` packs sprites, rooms, sounds and music into `build/toh.pak`.
+1. `tools/pack/pack.py` packs sprites, rooms, sounds, music and the game's GML source into `build/toh.pak`.
+2. `runtime/interp.cpp` parses that GML when the game starts and interprets it. Its lexer and parser copy
+   OpenGMK's, so GML's quirks are kept. The engine binary contains nothing from the game.
 3. `runtime/` is a reimplementation of the Game Maker runner (event order, collisions, views, drawing),
    following [OpenGMK](https://github.com/OpenGMK/OpenGMK). Because of that, the runtime should be treated as
    GPL-2.0, like OpenGMK.
@@ -55,7 +58,7 @@ tools/trace/compare.sh @my-run.keys      # replays it in the original under Wine
 - `tools/gm7extract/gm7decrypt.py`: standalone GM7 asset-stream decryptor (GMKrypt)
 - `tools/gm7extract/dump.py`: converts gm_reader output into plain files
 - `tools/gm7extract/inventory.py`: lists the GM built-ins the game uses (writes `docs/inventory.md`)
-- `tools/transpiler/`: GML to C++ transpiler
+- `tools/gen_tables.py`: builds the interpreter's name tables (runtime builtins, GM constants)
 - `tools/pack/`: asset packer
 - `runtime/`: the C++/SDL3 GM7 runner
 - `docs/`: notes on the port

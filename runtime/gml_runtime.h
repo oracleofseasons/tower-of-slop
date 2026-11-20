@@ -1,4 +1,4 @@
-// Core GML runtime types used by generated game code (build/gen/gml_code.cpp).
+// Core GML runtime types used by the interpreter (interp.cpp) and the builtins.
 // Semantics follow OpenGMK (tools/OpenGMK/gm8emulator/src/gml/value.rs etc.).
 #pragma once
 #include <cmath>
@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "gml_ids.h"
+#include "gml_functions.h"   // generated from runtime/*.cpp: GML_FUNCTIONS(X)
 
 namespace gml {
 
@@ -62,12 +62,19 @@ struct Slot {
     bool has(int key) const { return v.count(key) != 0; }
 };
 
+// the builtin variables the runtime implements (game code naming any other GM builtin is refused at load)
+#define GML_BUILTIN_VARS(X) \
+    X(x) X(y) X(xprevious) X(yprevious) X(xstart) X(ystart) X(hspeed) X(vspeed) X(speed) X(direction) \
+    X(friction) X(gravity) X(gravity_direction) X(sprite_index) X(image_index) X(image_speed) \
+    X(image_xscale) X(image_yscale) X(image_angle) X(image_alpha) X(image_blend) X(image_number) \
+    X(mask_index) X(depth) X(visible) X(solid) X(persistent) X(alarm) X(id) X(object_index) X(room) \
+    X(room_width) X(room_height) X(room_speed) X(view_xview) X(view_yview) X(view_wview) X(view_hview) \
+    X(background_hspeed) X(instance_count) X(instance_id)
+
 enum class BV {
-    x, y, xprevious, yprevious, xstart, ystart, hspeed, vspeed, speed, direction, friction,
-    gravity, gravity_direction, sprite_index, image_index, image_speed, image_xscale, image_yscale,
-    image_angle, image_alpha, image_blend, image_number, mask_index, depth, visible, solid,
-    persistent, alarm, id, object_index, room, room_width, room_height, room_speed,
-    view_xview, view_yview, view_wview, view_hview, background_hspeed, instance_count, instance_id,
+#define GML_BV_ENUM(n) n,
+    GML_BUILTIN_VARS(GML_BV_ENUM)
+#undef GML_BV_ENUM
 };
 
 enum class State : uint8_t { Active, Inactive, Deleted };
@@ -169,14 +176,14 @@ struct WithScope {
 
 // ------------------------------------------------------------------ code table
 
-using CodeFn = Value (*)(Ctx&);
+struct Code;   // a compiled piece of GML (interp.cpp)
 
 struct Action {
-    CodeFn fn = nullptr;     // execute-code action
+    const Code* fn = nullptr;     // execute-code action
     int library = 0, action = 0, target = -1;
     bool relative = false;
     std::vector<std::string> args;
-    static Action code(CodeFn f, int target) { Action a; a.fn = f; a.target = target; return a; }
+    static Action code(const Code* f, int target) { Action a; a.fn = f; a.target = target; return a; }
     static Action builtin(int lib, int act, int target, bool rel, std::vector<std::string> args) {
         Action a; a.library = lib; a.action = act; a.target = target; a.relative = rel; a.args = std::move(args);
         return a;
@@ -194,19 +201,16 @@ struct EventKey {
 
 struct CodeTable {
     std::map<EventKey, std::vector<Action>> events;
-    std::map<int, CodeFn> room_code, instance_code;
+    std::map<int, const Code*> room_code, instance_code;
     void add_event(int obj, int type, int number, std::vector<Action> acts) {
         events[{obj, type, number}] = std::move(acts);
     }
 };
 
-void register_game_code(CodeTable& table);
-
 // ------------------------------------------------------------------ builtins
+using BuiltinFn = Value (*)(Ctx&, const Args&);
 #define GML_DECLARE_FN(name) Value bi_##name(Ctx& C, const Args& a);
-GML_USED_FUNCTIONS(GML_DECLARE_FN)
+GML_FUNCTIONS(GML_DECLARE_FN)
 #undef GML_DECLARE_FN
 
 }  // namespace gml
-
-#include "gml_scripts.h"

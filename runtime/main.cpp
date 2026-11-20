@@ -117,8 +117,7 @@ int main(int argc, char** argv) {
     // Recording: a key change applied at the poll before frame G must be replayed by the
     // instrumented GML's keyboard_key_press during frame G-1, whose begin step sees the trace
     // counter's value at the start of G-1. So each event is stamped with that value.
-    int trace_var = -1;
-    for (int i = 0; i < V__COUNT; i++) if (std::string(USER_VAR_NAMES[i]) == "__trace_f") trace_var = i;
+    int trace_var = game.interp.find_var("__trace_f");
     if (!record.empty() && trace_var < 0) {
         std::fprintf(stderr, "--record needs an instrumented build (tools/trace/record.sh)\n");
         return 2;

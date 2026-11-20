@@ -142,8 +142,8 @@ bool Game::load(const std::string& path) {
     }
     Reader r;
     r.d.assign(std::istreambuf_iterator<char>(f), {});
-    if (r.d.size() < 8 || std::memcmp(r.d.data(), "TOHPAK01", 8) != 0) {
-        std::fprintf(stderr, "%s is not a TOHPAK01 file\n", path.c_str());
+    if (r.d.size() < 8 || std::memcmp(r.d.data(), "TOHPAK02", 8) != 0) {
+        std::fprintf(stderr, "%s is not a TOHPAK02 file\n", path.c_str());
         return false;
     }
     r.p = 8;
@@ -266,7 +266,61 @@ bool Game::load(const std::string& path) {
     room_order.resize(r.u32());
     for (auto& id : room_order) id = r.i32();
 
-    register_game_code(code);
+    // code: the game's GML, parsed and resolved by the interpreter
+    // GM's asset namespace (a later kind wins a name clash: sprites < ... < rooms < scripts)
+    auto names = [&](const auto& v) {
+        for (size_t i = 0; i < v.size(); i++) if (v[i]) interp.assets[v[i]->name] = static_cast<int>(i);
+    };
+    names(sprites); names(backgrounds); names(sounds); names(fonts); names(objects); names(rooms);
+    try {
+        std::vector<std::pair<int, Code*>> scripts;
+        uint32_t nscripts = r.u32();
+        for (uint32_t i = 0; i < nscripts; i++) {
+            std::string name = r.str();
+            int id = r.i32();
+            interp.script_ids[name] = id;
+            interp.assets[name] = id;
+            scripts.push_back({id, interp.parse(r.str(), "script " + name)});
+        }
+        uint32_t nevents = r.u32();
+        for (uint32_t i = 0; i < nevents; i++) {
+            int obj = r.i32(), type = r.i32(), number = r.i32();
+            std::string label = r.str();
+            std::string oname = obj >= 0 && obj < static_cast<int>(objects.size()) && objects[obj] ? objects[obj]->name : "?";
+            std::vector<Action> acts;
+            uint32_t nacts = r.u32();
+            for (uint32_t j = 0; j < nacts; j++) {
+                if (r.b()) {
+                    int target = r.i32();
+                    acts.push_back(Action::code(interp.parse(r.str(), oname + " " + label + " action " + std::to_string(j)), target));
+                } else {
+                    int lib = r.i32(), act = r.i32(), target = r.i32();
+                    bool rel = r.b();
+                    std::vector<std::string> args(r.u32());
+                    for (auto& x : args) x = r.str();
+                    acts.push_back(Action::builtin(lib, act, target, rel, std::move(args)));
+                }
+            }
+            code.add_event(obj, type, number, std::move(acts));
+        }
+        uint32_t nroom = r.u32();
+        for (uint32_t i = 0; i < nroom; i++) {
+            int id = r.i32();
+            std::string rname = r.str();
+            code.room_code[id] = interp.parse(r.str(), "room " + rname + " creation code");
+        }
+        uint32_t ninst = r.u32();
+        for (uint32_t i = 0; i < ninst; i++) {
+            int id = r.i32();
+            std::string rname = r.str();
+            code.instance_code[id] = interp.parse(r.str(), "instance " + std::to_string(id) + " in " + rname);
+        }
+        interp.link();
+        for (auto& [id, c] : scripts) interp.set_script(id, c);
+    } catch (const GmlError& e) {
+        std::fprintf(stderr, "game code: %s\n", e.msg.c_str());
+        return false;
+    }
     fill_holders();
     return true;
 }
@@ -428,10 +482,10 @@ void Game::run_instance_event(int type, int number, Instance* inst, Instance* ot
     }
 }
 
-void Game::run_code(CodeFn fn, Instance* self, Instance* other) {
+void Game::run_code(const Code* fn, Instance* self, Instance* other) {
     Ctx C(this, self, other);
     try {
-        fn(C);
+        interp.run(fn, C);
     } catch (const GmlError& e) {
         log_error(self && self->object_index >= 0 && objects[self->object_index] ? objects[self->object_index]->name
                                                                                    : std::string("?"),
@@ -884,7 +938,7 @@ int Game::rand_int(uint32_t bound) {
 // ================================================================== variables
 
 const char* Game::var_name(int id) const {
-    return id >= 0 && id < V__COUNT ? USER_VAR_NAMES[id] : "?";
+    return id >= 0 && id < static_cast<int>(interp.var_names.size()) ? interp.var_names[id].c_str() : "?";
 }
 
 static Value read_slot(const Slot& s, int key, const char* name) {

@@ -10,16 +10,20 @@ endif()
 find_package(SDL3 REQUIRED CONFIG)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# The game's code and assets come from your own copy of the game: run tools/extract.sh first.
+# The engine contains nothing from the game: its code and assets are read from toh.pak, made from
+# your own copy of the game (tools/extract.sh, then the pak target below).
 set(PROJECT_DIR ${CMAKE_SOURCE_DIR}/extracted/project CACHE PATH "Extracted (or instrumented) game project")
 set(GEN_DIR ${CMAKE_BINARY_DIR}/gen)
 file(GLOB_RECURSE GML_SOURCES CONFIGURE_DEPENDS ${PROJECT_DIR}/*.gml ${PROJECT_DIR}/*.json)
+file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/runtime/*.cpp)
 
+# name tables for the interpreter: the runtime's builtins, GM's builtin variables and constants
 add_custom_command(
-  OUTPUT ${GEN_DIR}/gml_code.cpp ${GEN_DIR}/gml_ids.h ${GEN_DIR}/gml_scripts.h
-  COMMAND Python3::Interpreter -I ${CMAKE_SOURCE_DIR}/tools/transpiler/gml2cpp.py ${PROJECT_DIR} ${GEN_DIR}
-  DEPENDS ${CMAKE_SOURCE_DIR}/tools/transpiler/gml2cpp.py ${CMAKE_SOURCE_DIR}/tools/transpiler/gm_builtins.json ${GML_SOURCES}
-  COMMENT "Transpiling GML to C++")
+  OUTPUT ${GEN_DIR}/gml_functions.h ${GEN_DIR}/gml_names.inc
+  COMMAND Python3::Interpreter -I ${CMAKE_SOURCE_DIR}/tools/gen_tables.py ${CMAKE_SOURCE_DIR}/runtime
+          ${CMAKE_SOURCE_DIR}/tools/gm_builtins.json ${GEN_DIR}
+  DEPENDS ${CMAKE_SOURCE_DIR}/tools/gen_tables.py ${CMAKE_SOURCE_DIR}/tools/gm_builtins.json ${RUNTIME_SOURCES}
+  COMMENT "Generating interpreter name tables")
 
 set(PACK_PYTHON ${CMAKE_SOURCE_DIR}/tools/.venv/bin/python)
 add_custom_command(
@@ -31,9 +35,8 @@ add_custom_target(pak ALL DEPENDS ${CMAKE_BINARY_DIR}/toh.pak)
 
 add_executable(toh
   runtime/main.cpp runtime/game.cpp runtime/render.cpp runtime/builtins.cpp runtime/value.cpp
-  ${GEN_DIR}/gml_code.cpp)
+  runtime/interp.cpp ${GEN_DIR}/gml_functions.h ${GEN_DIR}/gml_names.inc)
 target_include_directories(toh PRIVATE runtime ${GEN_DIR})
 target_link_libraries(toh PRIVATE SDL3::SDL3)
 target_compile_options(toh PRIVATE -Wall -Wextra -Wno-unused-parameter)
-set_source_files_properties(${GEN_DIR}/gml_code.cpp PROPERTIES COMPILE_OPTIONS "-Wno-unused-label;-Wno-unused-variable")
 add_dependencies(toh pak)

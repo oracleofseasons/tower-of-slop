@@ -217,8 +217,8 @@ Value bi_show_error(Ctx& C, const Args& a) {
 
 Value bi_variable_global_exists(Ctx& C, const Args& a) {
     std::string name = S(a, 0);
-    for (int i = 0; i < V__COUNT; i++)
-        if (name == USER_VAR_NAMES[i]) return G(C).globals.count(i) != 0;
+    int i = G(C).interp.find_var(name);
+    if (i >= 0) return G(C).globals.count(i) != 0;
     return false;
 }
 

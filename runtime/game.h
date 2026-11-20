@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "gml_runtime.h"
+#include "interp.h"
 
 namespace gml {
 
@@ -148,6 +149,7 @@ class Game {
     std::vector<std::pair<std::string, PcmSound>> includes;
     std::vector<int> room_order;
     CodeTable code;
+    Interp interp;
     std::map<int, std::vector<std::vector<int>>> holders;   // event type -> number -> object list (see fill_holders)
     std::map<std::pair<int, int>, std::vector<int>> event_holders;
     std::vector<bool> custom_draw;
@@ -207,7 +209,7 @@ class Game {
     void run_object_event(int type, int number, Instance* other = nullptr);
     void run_instance_event(int type, int number, Instance* inst, Instance* other);
     void run_actions(const std::vector<Action>& acts, Instance* inst, Instance* other);
-    void run_code(CodeFn fn, Instance* self, Instance* other);
+    void run_code(const Code* fn, Instance* self, Instance* other);
     void run_alarms();
     void run_key_press_events();
     void run_collisions();

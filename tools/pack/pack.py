@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Pack extracted/project into a single binary asset file for the runtime.
 
-Format (little-endian): magic 'TOHPAK01', then sections in order:
-  sprites, backgrounds, fonts, sounds, objects, rooms, includes, room_order
+Format (little-endian): magic 'TOHPAK02', then sections in order:
+  sprites, backgrounds, fonts, sounds, objects, rooms, includes, room_order, code
+The code section holds the game's GML as source text, which the runtime's interpreter runs:
+  scripts (name, id, source), object events (object, type, number, actions),
+  room creation code (room id, source), instance creation code (instance id, source).
 Each section: u32 count, then per slot: u8 present, payload.
 Strings are u32 length + bytes. Images are raw RGBA8 (fonts: 8-bit gray).
 Music (.ogg includes) is decoded to 16-bit PCM WAV with ffmpeg.
@@ -68,7 +71,7 @@ def rgba(path):
 def main():
     proj, out = sys.argv[1], sys.argv[2]
     w = W()
-    w.b += b'TOHPAK01'
+    w.b += b'TOHPAK02'
 
     def sprite(s):
         d = os.path.dirname(s['_path'])
@@ -159,6 +162,38 @@ def main():
     w.u32(len(game['room_order']))
     for name in game['room_order']:
         w.i32(room_ids[name])
+
+    # code
+    script_ids = json.load(open(f'{proj}/scripts/index.json'))
+    w.u32(len(script_ids))
+    for name, sid in sorted(script_ids.items(), key=lambda kv: kv[1]):
+        w.str(name); w.i32(sid); w.str(open(f'{proj}/scripts/{name}.gml', encoding='latin-1').read())
+    objs = sorted(load_dir(f'{proj}/objects/*/object.json').values(), key=lambda o: o['id'])
+    events = [(o, ev) for o in objs for ev in o['events']]
+    w.u32(len(events))
+    for o, ev in events:
+        w.i32(o['id']); w.i32(ev['type']); w.i32(ev['number']); w.str(ev['label'])
+        w.u32(len(ev['actions']))
+        for a in ev['actions']:
+            if 'code_file' in a:
+                w.u8(1); w.i32(a['target'])
+                w.str(open(f'{os.path.dirname(o["_path"])}/{a["code_file"]}', encoding='latin-1').read())
+            else:
+                w.u8(0); w.i32(a['library_id']); w.i32(a['action_id']); w.i32(a['target'])
+                w.bool(a['relative'])
+                w.u32(len(a['arguments']))
+                for x in a['arguments']:
+                    w.str(x)
+    rooms = sorted(load_dir(f'{proj}/rooms/*.json').values(), key=lambda r: r['id'])
+    rc = [(r['id'], r['name'], r['creation_code']) for r in rooms if r['creation_code'].strip()]
+    w.u32(len(rc))
+    for rid, rname, src in rc:
+        w.i32(rid); w.str(rname); w.str(src)
+    ic = [(i['id'], r['name'], i['creation_code']) for r in rooms for i in r['instances']
+          if i['creation_code'].strip()]
+    w.u32(len(ic))
+    for iid, rname, src in ic:
+        w.i32(iid); w.str(rname); w.str(src)
 
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     open(out, 'wb').write(w.b)
