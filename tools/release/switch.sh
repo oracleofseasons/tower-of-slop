@@ -11,8 +11,7 @@ out = f'{root}/dist/tower-of-slop-switch2.zip'
 with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
     z.write(f'{root}/platform/switch/toh.nro', 'switch/toh/toh.nro')
     z.write(f'{root}/tools/release/settings-switch.ini', 'switch/toh/settings.ini')
-    for f in ('PLAYING.txt', 'LICENSE', 'THIRD_PARTY.md'):
-        src = f'{root}/tools/release/{f}' if f == 'PLAYING.txt' else f'{root}/{f}'
-        z.write(src, f'switch/toh/{f}')
+    for f in ('LICENSE', 'THIRD_PARTY.md'):
+        z.write(f'{root}/{f}', f'switch/toh/{f}')
 print(out)
 PY

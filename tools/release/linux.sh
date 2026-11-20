@@ -25,7 +25,6 @@ cmake --build /tmp/toh --target toh
 strip /tmp/toh/toh
 mkdir -p /tmp/pkg/toh
 cp /tmp/toh/toh /src/LICENSE /src/THIRD_PARTY.md /tmp/pkg/toh/
-cp /src/tools/release/PLAYING.txt /tmp/pkg/toh/
 cp /src/tools/release/settings-linux.ini /tmp/pkg/toh/settings.ini
 rm -f /src/dist/tower-of-slop-linux-x86_64.zip
 cd /tmp/pkg && zip -qr /src/dist/tower-of-slop-linux-x86_64.zip toh

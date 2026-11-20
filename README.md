@@ -14,6 +14,23 @@ game's data out of the exe (under a second) and keeps it in your data folder
 (`~/.local/share/Askiisoft/Tower of Heaven/` on Linux); after that the exe isn't needed.
 `--game PATH` points at an exe somewhere else.
 
+**Switch 2 (homebrew):** extract the Switch zip to the root of your SD card (it holds `switch/toh/`),
+put `Tower of Heaven.exe` in `sdmc:/switch/toh/` and start Tower of Slop from the homebrew menu. The
+first start also copies the game's icon from the exe onto the menu.
+
+| | Keyboard (as the original) | Switch |
+|---|---|---|
+| Move | Arrow keys | Stick or D-pad |
+| Jump | Up or Z | B or Y (or Up) |
+| Confirm, talk, use doors | Down or X | A or X (or Down) |
+| Menu | Q | + |
+| Rulebook | W | − |
+| Quit | | + and − together |
+
+**Settings:** `settings.ini` next to the program (on Switch, in `sdmc:/switch/toh/`) has a few
+optional changes to the original; each one is explained in the file. Delete the file to play the
+original exactly.
+
 ## Setup for development
 
 1. Put the Windows release in `original/windows/` (`Tower of Heaven.exe`, `supersound.dll`, ...).
