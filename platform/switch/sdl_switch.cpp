@@ -21,13 +21,59 @@
 
 namespace {
 std::string g_error;
-bool fail(const char* msg) { g_error = msg; return false; }
 const char* const kDataDir = "sdmc:/switch/toh/";
+bool fail(const char* msg) {
+    g_error = msg;
+    std::fprintf(stderr, "[switch] error: %s\n", msg);
+    return false;
+}
 }  // namespace
+
+// ================================================================== log and crash report
+// Everything written to stderr goes to sdmc:/switch/toh/toh.log. A crash writes its address and
+// a backtrace there (as offsets into toh.elf, for addr2line) and returns to the homebrew menu.
+
+extern "C" char __start__;   // the start of this module (libnx crt0)
+
+static void open_log() {
+    static bool open = false;
+    if (open) return;
+    open = true;
+    mkdir("sdmc:/switch", 0777);
+    mkdir(kDataDir, 0777);
+    if (std::freopen("sdmc:/switch/toh/toh.log", "w", stderr)) std::setvbuf(stderr, nullptr, _IONBF, 0);
+    std::fprintf(stderr, "[switch] log open; module base %p\n", static_cast<void*>(&__start__));
+}
+
+extern "C" {
+alignas(16) u8 __nx_exception_stack[0x10000];
+u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
+
+void __libnx_exception_handler(ThreadExceptionDump* ctx) {
+    const u64 base = reinterpret_cast<u64>(&__start__);
+    std::fprintf(stderr, "[switch] CRASH: error_desc %u, esr 0x%x\n", ctx->error_desc, ctx->esr);
+    std::fprintf(stderr, "[switch]   pc  0x%lx (toh.elf +0x%lx)\n", ctx->pc.x, ctx->pc.x - base);
+    std::fprintf(stderr, "[switch]   lr  0x%lx (toh.elf +0x%lx)\n", ctx->lr.x, ctx->lr.x - base);
+    std::fprintf(stderr, "[switch]   far 0x%lx, sp 0x%lx\n", ctx->far.x, ctx->sp.x);
+    u64 fp = ctx->fp.x;
+    for (int i = 0; i < 32 && fp && (fp & 7) == 0; i++) {
+        u64 ret = reinterpret_cast<u64*>(fp)[1];
+        std::fprintf(stderr, "[switch]   #%d 0x%lx (toh.elf +0x%lx)\n", i, ret, ret - base);
+        u64 next = reinterpret_cast<u64*>(fp)[0];
+        if (next <= fp) break;
+        fp = next;
+    }
+    std::fflush(stderr);
+    svcExitProcess();
+}
+}
 
 // ================================================================== basics
 
-bool SDL_Init(Uint32) { return true; }
+bool SDL_Init(Uint32) {
+    open_log();
+    return true;
+}
 void SDL_Quit() {}
 const char* SDL_GetError() { return g_error.c_str(); }
 bool SDL_SetHint(const char*, const char*) { return true; }
@@ -122,6 +168,13 @@ GLuint shader(GLenum kind, const char* src) {
     GLuint s = glCreateShader(kind);
     glShaderSource(s, 1, &src, nullptr);
     glCompileShader(s);
+    GLint ok = 0;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[1024] = {};
+        glGetShaderInfoLog(s, sizeof log, nullptr, log);
+        std::fprintf(stderr, "[switch] shader compile failed: %s\n", log);
+    }
     return s;
 }
 
@@ -174,7 +227,9 @@ SDL_Renderer* SDL_CreateRenderer(SDL_Window* window, const char*) {
     r->context = eglCreateContext(r->display, config, EGL_NO_CONTEXT, ctx_attrs);
     if (!r->surface || !r->context) { fail("EGL surface/context failed"); return nullptr; }
     eglMakeCurrent(r->display, r->surface, r->surface, r->context);
-    gladLoadGL();
+    if (!gladLoadGL()) { fail("could not load OpenGL"); return nullptr; }
+    std::fprintf(stderr, "[switch] GL %s / %s\n", reinterpret_cast<const char*>(glGetString(GL_VERSION)),
+                 reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
     EGLint w = 0, h = 0;
     eglQuerySurface(r->display, r->surface, EGL_WIDTH, &w);
     eglQuerySurface(r->display, r->surface, EGL_HEIGHT, &h);
@@ -184,6 +239,13 @@ SDL_Renderer* SDL_CreateRenderer(SDL_Window* window, const char*) {
     glAttachShader(r->program, shader(GL_VERTEX_SHADER, kVert));
     glAttachShader(r->program, shader(GL_FRAGMENT_SHADER, kFrag));
     glLinkProgram(r->program);
+    GLint linked = 0;
+    glGetProgramiv(r->program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[1024] = {};
+        glGetProgramInfoLog(r->program, sizeof log, nullptr, log);
+        std::fprintf(stderr, "[switch] shader link failed: %s\n", log);
+    }
     glUseProgram(r->program);
     r->u_proj = glGetUniformLocation(r->program, "proj");
     glUniform1i(glGetUniformLocation(r->program, "tex"), 0);
@@ -207,6 +269,7 @@ SDL_Renderer* SDL_CreateRenderer(SDL_Window* window, const char*) {
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     g_renderer = r;
     bind_target(r);
+    std::fprintf(stderr, "[switch] renderer ready, %dx%d, GL error 0x%x\n", r->out_w, r->out_h, glGetError());
     return r;
 }
 
@@ -227,6 +290,8 @@ SDL_Texture* SDL_CreateTexture(SDL_Renderer*, SDL_PixelFormat, SDL_TextureAccess
         glGenFramebuffers(1, &t->fbo);
         glBindFramebuffer(GL_FRAMEBUFFER, t->fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->tex, 0);
+        GLenum st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (st != GL_FRAMEBUFFER_COMPLETE) std::fprintf(stderr, "[switch] render target %dx%d incomplete: 0x%x\n", w, h, st);
         glClearColor(0, 0, 0, 0);
         glClear(GL_COLOR_BUFFER_BIT);
         if (g_renderer) bind_target(g_renderer);
@@ -466,6 +531,7 @@ SDL_AudioDeviceID SDL_OpenAudioDevice(SDL_AudioDeviceID, const SDL_AudioSpec*) {
         return 0;
     }
     std::thread(audio_thread).detach();
+    std::fprintf(stderr, "[switch] audio: %u Hz, %u channels\n", audoutGetSampleRate(), audoutGetChannelCount());
     return 1;
 }
 
@@ -573,6 +639,12 @@ void poll_pad() {
     }
     padUpdate(&g_pad);
     u64 now = padGetButtons(&g_pad);
+    if ((now & HidNpadButton_Plus) && (now & HidNpadButton_Minus)) {   // + and - together: back to hbmenu
+        SDL_Event e{};
+        e.type = SDL_EVENT_QUIT;
+        g_events.push_back(e);
+        return;
+    }
     for (const Bind& b : kBinds) {
         bool was = (g_prev_buttons & b.button) != 0, is = (now & b.button) != 0;
         if (was == is) continue;

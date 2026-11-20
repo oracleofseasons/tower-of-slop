@@ -20,7 +20,7 @@ ARCH	:=	$(SWITCH2_CPU) -mtp=soft -fPIE
 CFLAGS	:=	-g -Wall -O2 -ffunction-sections $(ARCH) $(DEFINES) $(INCLUDE) -D__SWITCH__
 CXXFLAGS	:=	$(CFLAGS) -std=gnu++20 -Wno-unused-parameter
 ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+LDFLAGS	=	-specs=$(LIBNX)/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 LIBS	:=	-lglad -lEGL -lglapi -ldrm_nouveau -lz -lnx
 LIBDIRS	:=	$(PORTLIBS) $(LIBNX)
 

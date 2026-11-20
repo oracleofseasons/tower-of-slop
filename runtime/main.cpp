@@ -173,9 +173,12 @@ int main(int argc, char** argv) {
     }
     if (save_dir.empty()) save_dir = data_dir;
     else if (save_dir.back() != '/') save_dir += '/';
-    if (!game.init_video(headless >= 0)) return 1;
+    if (!game.init_video(headless >= 0)) { std::fprintf(stderr, "video/audio setup failed\n"); return 1; }
     pak = prepare_pak(pak, game_exe, data_dir, headless >= 0);
-    if (pak.empty() || !game.load(pak)) return 1;
+    if (pak.empty()) return 1;
+    std::fprintf(stderr, "loading %s\n", pak.c_str());
+    if (!game.load(pak)) { std::fprintf(stderr, "loading %s failed\n", pak.c_str()); return 1; }
+    std::fprintf(stderr, "loaded; starting the game\n");
     game.save_dir = save_dir;
     game.rng = static_cast<uint32_t>(SDL_GetTicksNS());
     if (headless >= 0) game.rng = 0;   // deterministic runs
