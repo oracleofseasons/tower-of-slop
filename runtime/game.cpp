@@ -3,6 +3,7 @@
 #include "game.h"
 
 #include <algorithm>
+#include <cmath>
 #include <unordered_set>
 #include <cstring>
 #include <fstream>
@@ -40,8 +41,85 @@ struct Reader {
     std::vector<uint8_t> blob() { return bytes(u32()); }
 };
 
+// A small MIDI renderer for the game's one MIDI, sound_start: three 50 ms notes on GM program
+// 81 (Square Lead). Every melodic note is played as a square wave with a short attack and
+// release, which is close to what Windows' GS synth does with that patch; drums (channel 10)
+// are skipped. Rendered once at load to 44.1 kHz mono S16.
+bool render_midi(const std::vector<uint8_t>& d, PcmSound& out) {
+    auto be = [&](size_t p, int n) { uint32_t v = 0; for (int i = 0; i < n; i++) v = v << 8 | d.at(p + i); return v; };
+    if (d.size() < 14 || std::memcmp(d.data(), "MThd", 4) != 0) return false;
+    int ntracks = be(10, 2), division = be(12, 2);
+    if (division <= 0 || (division & 0x8000)) return false;
+    struct Ev { uint64_t tick; int kind; uint32_t a, b; };   // kind 0 note on, 1 note off, 2 tempo
+    std::vector<Ev> evs;
+    size_t p = 8 + be(4, 4);
+    for (int t = 0; t < ntracks && p + 8 <= d.size(); t++) {
+        if (std::memcmp(&d[p], "MTrk", 4) != 0) return false;
+        size_t end = std::min(d.size(), p + 8 + be(p + 4, 4));
+        p += 8;
+        uint64_t tick = 0;
+        int status = 0;
+        auto vlq = [&]() { uint32_t v = 0; uint8_t c; do { c = d.at(p++); v = v << 7 | (c & 0x7f); } while (c & 0x80); return v; };
+        while (p < end) {
+            tick += vlq();
+            int c = d.at(p);
+            if (c & 0x80) { status = c; p++; }
+            if (status == 0xff) {
+                int type = d.at(p++);
+                uint32_t len = vlq();
+                if (type == 0x51 && len == 3) evs.push_back({tick, 2, be(p, 3), 0});
+                p += len;
+                if (type == 0x2f) break;
+            } else if (status == 0xf0 || status == 0xf7) {
+                p += vlq();
+            } else {
+                int hi = status & 0xf0, ch = status & 0x0f;
+                uint32_t a = d.at(p++), b = (hi == 0xc0 || hi == 0xd0) ? 0 : d.at(p++);
+                if (ch == 9) continue;
+                if (hi == 0x90 && b > 0) evs.push_back({tick, 0, a, b});
+                else if (hi == 0x80 || hi == 0x90) evs.push_back({tick, 1, a, 0});
+            }
+        }
+        p = end;
+    }
+    std::stable_sort(evs.begin(), evs.end(), [](const Ev& x, const Ev& y) { return x.tick < y.tick; });
+
+    const int rate = 44100;
+    const double attack = 0.003, release = 0.03;
+    struct Note { int key; double vel, on, off; };
+    std::vector<Note> notes;
+    double us_per_tick = 500000.0 / division, now = 0;
+    uint64_t last = 0;
+    for (const Ev& e : evs) {
+        now += (e.tick - last) * us_per_tick / 1e6;
+        last = e.tick;
+        if (e.kind == 2) us_per_tick = static_cast<double>(e.a) / division;
+        else if (e.kind == 0) notes.push_back({static_cast<int>(e.a), e.b / 127.0, now, -1});
+        else for (auto& n : notes) if (n.key == static_cast<int>(e.a) && n.off < 0) { n.off = now; break; }
+    }
+    if (notes.empty()) return false;
+    double total = 0;
+    for (auto& n : notes) { if (n.off < 0) n.off = now; total = std::max(total, n.off + release); }
+    std::vector<int16_t> pcm(static_cast<size_t>(total * rate) + 1, 0);
+    for (const Note& n : notes) {
+        double freq = 440.0 * std::pow(2.0, (n.key - 69) / 12.0);
+        size_t s0 = static_cast<size_t>(n.on * rate), s1 = std::min(pcm.size(), static_cast<size_t>((n.off + release) * rate));
+        for (size_t i = s0; i < s1; i++) {
+            double t = static_cast<double>(i) / rate - n.on;
+            double env = std::min(1.0, t / attack);
+            if (t > n.off - n.on) env *= std::max(0.0, 1.0 - (t - (n.off - n.on)) / release);
+            double sq = std::fmod(t * freq, 1.0) < 0.5 ? 1.0 : -1.0;
+            int v = pcm[i] + static_cast<int>(sq * env * n.vel * 0.25 * 32767);
+            pcm[i] = static_cast<int16_t>(std::clamp(v, -32768, 32767));
+        }
+    }
+    out.spec = {SDL_AUDIO_S16, 1, rate};
+    out.pcm.assign(reinterpret_cast<uint8_t*>(pcm.data()), reinterpret_cast<uint8_t*>(pcm.data() + pcm.size()));
+    return true;
+}
+
 bool decode_wav(const std::vector<uint8_t>& data, PcmSound& out) {
-    // only WAV is supported; the game's single MIDI (sound_start, 164 bytes) is left silent
+    if (data.size() >= 4 && std::memcmp(data.data(), "MThd", 4) == 0) return render_midi(data, out);
     if (data.size() < 12 || std::memcmp(data.data(), "RIFF", 4) != 0) return false;
     SDL_IOStream* io = SDL_IOFromConstMem(data.data(), data.size());
     Uint8* buf = nullptr;
