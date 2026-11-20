@@ -1,5 +1,8 @@
 // Entry point: window, input, frame timing.
-//   toh [--pak FILE] [--save-dir DIR] [--headless FRAMES] [--shot FILE.bmp] [--shot-every N DIR]
+// On first run the game's data is extracted from your copy of "Tower of Heaven.exe" (found with
+// --game, next to this program, in the current folder or in the data folder) and cached as toh.pak
+// in the data folder.
+//   toh [--game EXE] [--pak FILE] [--extract EXE OUT.pak] [--save-dir DIR] [--headless FRAMES] [--shot FILE.bmp] [--shot-every N DIR]
 //       [--room ID|NAME]   (start in that room instead of the first; for testing)
 //       [--record FILE]    (instrumented builds: save your key presses for tools/trace/compare.sh)
 //       [--warp ID|NAME]   (boot normally; the first entry into level_1 goes to this room instead)
@@ -13,6 +16,7 @@
 #include <map>
 #include <string>
 
+#include "extract.h"
 #include "game.h"
 
 using namespace gml;
@@ -40,6 +44,67 @@ static int vk_from_scancode(SDL_Scancode sc) {
     return -1;
 }
 
+static bool is_current_pak(const std::string& path) {
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return false;
+    char magic[8] = {};
+    size_t n = std::fread(magic, 1, 8, f);
+    std::fclose(f);
+    return n == 8 && std::memcmp(magic, "TOHPAK02", 8) == 0;
+}
+
+static bool write_file(const std::string& path, const std::vector<uint8_t>& data) {
+    std::string tmp = path + ".tmp";
+    FILE* f = std::fopen(tmp.c_str(), "wb");
+    if (!f) return false;
+    bool ok = std::fwrite(data.data(), 1, data.size(), f) == data.size();
+    ok = std::fclose(f) == 0 && ok;
+    return ok && SDL_RenamePath(tmp.c_str(), path.c_str());
+}
+
+static void fatal(const std::string& msg, bool headless) {
+    std::fprintf(stderr, "%s\n", msg.c_str());
+    if (!headless) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Tower of Heaven", msg.c_str(), nullptr);
+}
+
+// The pak to run: --pak, else the cached one, else extracted now from the original exe.
+static std::string prepare_pak(const std::string& pak_arg, const std::string& game_arg, const std::string& data_dir,
+                               bool headless) {
+    if (!pak_arg.empty()) return pak_arg;
+    std::string cached = data_dir + "toh.pak";
+    if (game_arg.empty() && is_current_pak(cached)) return cached;
+
+    const char* exe_name = "Tower of Heaven.exe";
+    std::vector<std::string> candidates;
+    if (!game_arg.empty()) candidates.push_back(game_arg);
+    else {
+        if (const char* base = SDL_GetBasePath()) candidates.push_back(std::string(base) + exe_name);
+        candidates.push_back(exe_name);
+        candidates.push_back(data_dir + exe_name);
+    }
+    for (const std::string& exe : candidates) {
+        SDL_PathInfo info;
+        if (!SDL_GetPathInfo(exe.c_str(), &info) || info.type != SDL_PATHTYPE_FILE) continue;
+        std::fprintf(stderr, "extracting the game's data from %s...\n", exe.c_str());
+        std::vector<uint8_t> pak;
+        std::string err;
+        if (!extract_pak(exe, pak, err)) {
+            fatal("Could not read " + exe + ":\n" + err, headless);
+            return "";
+        }
+        if (!write_file(cached, pak)) {
+            fatal("Could not write " + cached, headless);
+            return "";
+        }
+        return cached;
+    }
+    std::string where = SDL_GetBasePath() ? SDL_GetBasePath() : "";
+    fatal(std::string("This needs your copy of the original game.\n\nPut \"") + exe_name + "\" next to this program" +
+              (where.empty() ? "" : " (" + where + ")") + ", or in " + data_dir + ", and start it again.",
+          headless);
+    return "";
+}
+
 static void save_screen(Game& g, const std::string& path) {
     SDL_SetRenderTarget(g.renderer, g.screen);
     SDL_Surface* s = SDL_RenderReadPixels(g.renderer, nullptr);
@@ -50,13 +115,25 @@ static void save_screen(Game& g, const std::string& path) {
 }
 
 int main(int argc, char** argv) {
-    std::string pak = "toh.pak", save_dir, shot, shot_dir, start_room, warp, record;
+    std::string pak, game_exe, save_dir, shot, shot_dir, start_room, warp, record;
     long headless = -1, shot_every = 0;
     std::multimap<long, std::pair<int, long>> scripted_keys;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
         if (a == "--pak") pak = next();
+        else if (a == "--game") game_exe = next();
+        else if (a == "--extract") {
+            std::string exe = next(), out = next();
+            std::vector<uint8_t> data;
+            std::string err;
+            if (!extract_pak(exe, data, err) || !write_file(out, data)) {
+                std::fprintf(stderr, "extract failed: %s\n", err.empty() ? out.c_str() : err.c_str());
+                return 1;
+            }
+            std::fprintf(stderr, "wrote %s (%zu bytes)\n", out.c_str(), data.size());
+            return 0;
+        }
         else if (a == "--save-dir") save_dir = next();
         else if (a == "--headless") headless = std::atol(next().c_str());
         else if (a == "--shot") shot = next();
@@ -88,15 +165,17 @@ int main(int argc, char** argv) {
 
     static Game game;
     g_game = &game;
-    if (!game.init_video(headless >= 0)) return 1;
-    if (!game.load(pak)) return 1;
-    if (save_dir.empty()) {
+    std::string data_dir;
+    {
         char* pref = SDL_GetPrefPath("Askiisoft", "Tower of Heaven");
-        save_dir = pref ? pref : "./";
+        data_dir = pref ? pref : "./";
         SDL_free(pref);
-    } else if (save_dir.back() != '/') {
-        save_dir += '/';
     }
+    if (save_dir.empty()) save_dir = data_dir;
+    else if (save_dir.back() != '/') save_dir += '/';
+    if (!game.init_video(headless >= 0)) return 1;
+    pak = prepare_pak(pak, game_exe, data_dir, headless >= 0);
+    if (pak.empty() || !game.load(pak)) return 1;
     game.save_dir = save_dir;
     game.rng = static_cast<uint32_t>(SDL_GetTicksNS());
     if (headless >= 0) game.rng = 0;   // deterministic runs

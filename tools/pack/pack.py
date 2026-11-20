@@ -8,17 +8,15 @@ The code section holds the game's GML as source text, which the runtime's interp
   room creation code (room id, source), instance creation code (instance id, source).
 Each section: u32 count, then per slot: u8 present, payload.
 Strings are u32 length + bytes. Images are raw RGBA8 (fonts: 8-bit gray).
-Music (.ogg includes) is decoded to 16-bit PCM WAV with ffmpeg.
+Included files are stored as they are (music stays OGG; the runtime decodes it).
 
-usage: pack.py <extracted/project> <out.pak>      (needs Pillow, ffmpeg)
+usage: pack.py <extracted/project> <out.pak>      (needs Pillow)
 """
 import glob
 import json
 import os
 import struct
-import subprocess
 import sys
-import tempfile
 
 from PIL import Image
 
@@ -146,16 +144,8 @@ def main():
 
     incs = sorted(p for p in glob.glob(f'{proj}/includes/*') if not p.endswith('.dll'))
     w.u32(len(incs))
-    with tempfile.TemporaryDirectory() as tmp:
-        for p in incs:
-            name = os.path.basename(p)
-            data = open(p, 'rb').read()
-            if name.lower().endswith('.ogg'):
-                wav = os.path.join(tmp, 'out.wav')
-                subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', p, '-acodec', 'pcm_s16le', wav],
-                               check=True)
-                data = open(wav, 'rb').read()
-            w.str(name); w.blob(data)
+    for p in incs:
+        w.str(os.path.basename(p)); w.blob(open(p, 'rb').read())
 
     game = json.load(open(f'{proj}/game.json'))
     room_ids = {r['name']: r['id'] for r in load_dir(f'{proj}/rooms/*.json').values()}

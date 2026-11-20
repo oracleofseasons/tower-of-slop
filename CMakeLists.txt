@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(tower_of_heaven CXX)
+project(tower_of_heaven C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,6 +8,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(SDL3 REQUIRED CONFIG)
+find_package(ZLIB REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # The engine contains nothing from the game: its code and assets are read from toh.pak, made from
@@ -35,8 +36,13 @@ add_custom_target(pak ALL DEPENDS ${CMAKE_BINARY_DIR}/toh.pak)
 
 add_executable(toh
   runtime/main.cpp runtime/game.cpp runtime/render.cpp runtime/builtins.cpp runtime/value.cpp
-  runtime/interp.cpp ${GEN_DIR}/gml_functions.h ${GEN_DIR}/gml_names.inc)
+  runtime/interp.cpp runtime/extract.cpp ${GEN_DIR}/gml_functions.h ${GEN_DIR}/gml_names.inc)
+
+# OGG decoding (third_party/stb_vorbis, public domain / MIT)
+add_library(stb_vorbis STATIC third_party/stb_vorbis/stb_vorbis.c)
+set_target_properties(stb_vorbis PROPERTIES LINKER_LANGUAGE C)
+target_compile_options(stb_vorbis PRIVATE -w)
 target_include_directories(toh PRIVATE runtime ${GEN_DIR})
-target_link_libraries(toh PRIVATE SDL3::SDL3)
+target_link_libraries(toh PRIVATE SDL3::SDL3 ZLIB::ZLIB stb_vorbis)
 target_compile_options(toh PRIVATE -Wall -Wextra -Wno-unused-parameter)
 add_dependencies(toh pak)

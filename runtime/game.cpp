@@ -3,6 +3,7 @@
 #include "game.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <unordered_set>
 #include <cstring>
@@ -26,6 +27,9 @@ void Game::log_error(const std::string& where, const std::string& msg) {
 }
 
 // ================================================================== pak loading
+
+extern "C" int stb_vorbis_decode_memory(const unsigned char* mem, int len, int* channels, int* sample_rate,
+                                        short** output);
 
 namespace {
 struct Reader {
@@ -118,8 +122,24 @@ bool render_midi(const std::vector<uint8_t>& d, PcmSound& out) {
     return true;
 }
 
+bool decode_ogg(const std::vector<uint8_t>& data, PcmSound& out) {
+    int channels = 0, rate = 0;
+    short* samples = nullptr;
+    int frames = stb_vorbis_decode_memory(data.data(), static_cast<int>(data.size()), &channels, &rate, &samples);
+    if (frames < 0 || !samples) {
+        std::fprintf(stderr, "ogg decode failed\n");
+        return false;
+    }
+    out.spec = {SDL_AUDIO_S16, channels, rate};
+    out.pcm.assign(reinterpret_cast<uint8_t*>(samples), reinterpret_cast<uint8_t*>(samples + static_cast<size_t>(frames) * channels));
+    std::free(samples);
+    return true;
+}
+
+// sound data as GM stores it: WAV, MIDI (rendered), or OGG (music included as files)
 bool decode_wav(const std::vector<uint8_t>& data, PcmSound& out) {
     if (data.size() >= 4 && std::memcmp(data.data(), "MThd", 4) == 0) return render_midi(data, out);
+    if (data.size() >= 4 && std::memcmp(data.data(), "OggS", 4) == 0) return decode_ogg(data, out);
     if (data.size() < 12 || std::memcmp(data.data(), "RIFF", 4) != 0) return false;
     SDL_IOStream* io = SDL_IOFromConstMem(data.data(), data.size());
     Uint8* buf = nullptr;

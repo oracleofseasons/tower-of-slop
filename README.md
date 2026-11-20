@@ -1,11 +1,19 @@
 # Tower of Heaven port
 
-A C++/SDL2 reimplementation of the Game Maker 7 runner for Askiisoft's *Tower of Heaven*
+A C++/SDL3 reimplementation of the Game Maker 7 runner for Askiisoft's *Tower of Heaven*
 (2009), aiming to play the same as the original frame for frame. Linux first, Switch 2 homebrew later.
 
-No game assets are in this repo. You need your own copy of the game.
+Nothing from the game is in this repo or in the engine: its code, art, sound and music are read from your
+own copy of the game.
 
-## Setup
+## Playing
+
+Put `toh` next to `Tower of Heaven.exe` from the original game and run it. The first start reads the
+game's data out of the exe (under a second) and keeps it in your data folder
+(`~/.local/share/Askiisoft/Tower of Heaven/` on Linux); after that the exe isn't needed.
+`--game PATH` points at an exe somewhere else.
+
+## Setup for development
 
 1. Put the Windows release in `original/windows/` (`Tower of Heaven.exe`, `supersound.dll`, ...).
 2. Run `tools/extract.sh`. It decrypts the exe and writes the project to `extracted/project/`:
@@ -13,13 +21,17 @@ No game assets are in this repo. You need your own copy of the game.
 
 ## Build and run (Linux)
 
-Needs CMake, a C++20 compiler, SDL3, Python 3 and ffmpeg.
+Needs CMake, a C++20 compiler, SDL3, zlib and Python 3.
 
 ```sh
-tools/extract.sh                      # once: decrypt your exe into extracted/
 cmake -S . -B build && cmake --build build -j
-./build/toh --pak build/toh.pak
+./build/toh                           # first run: extracts from Tower of Heaven.exe as above
+./build/toh --extract "original/windows/Tower of Heaven.exe" my.pak   # or just write the pak
 ```
+
+The development tools (trace comparison, instrumented builds) also need `tools/extract.sh`, which writes
+`extracted/project/`; with it, the build also packs `build/toh.pak` (`./build/toh --pak build/toh.pak`).
+That pak is byte-for-byte what the engine's own extractor writes.
 
 Controls are the original's: arrows to move, Up or Z to jump, Down or X to advance dialogue and use doors, Q for the menu, W for the rulebook.
 
