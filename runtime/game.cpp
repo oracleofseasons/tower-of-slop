@@ -524,6 +524,10 @@ void Game::destroy_instance(Instance* inst) {
 
 void Game::load_room(int id) {
     if (id < 0 || id >= static_cast<int>(rooms.size()) || !rooms[id]) error("room_goto: no such room");
+    if (warp_room >= 0 && rooms[id]->name == "level_1") {
+        id = warp_room;
+        warp_room = -1;
+    }
     scene_change.reset();
 
     run_other_event(5);   // room end

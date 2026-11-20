@@ -159,6 +159,7 @@ class Game {
     int last_tile_id = 0;
     std::optional<int> scene_change;   // room id, or -100 for game end
     bool game_start = true;
+    int warp_room = -1;   // testing: the first entry into level_1 goes here instead
     bool quit = false;
     std::unordered_map<int, Slot> globals;
     Instance dummy;

@@ -1,5 +1,7 @@
 // Entry point: window, input, frame timing.
 //   toh [--pak FILE] [--save-dir DIR] [--headless FRAMES] [--shot FILE.bmp] [--shot-every N DIR]
+//       [--room ID|NAME]   (start in that room instead of the first; for testing)
+//       [--warp ID|NAME]   (boot normally; the first entry into level_1 goes to this room instead)
 //       [--keys "frame:KEY[:FRAMES],..."]   (headless input, KEY = GM vk code, held FRAMES, default 1)
 #include <SDL3/SDL.h>
 
@@ -45,7 +47,7 @@ static void save_screen(Game& g, const std::string& path) {
 }
 
 int main(int argc, char** argv) {
-    std::string pak = "toh.pak", save_dir, shot, shot_dir;
+    std::string pak = "toh.pak", save_dir, shot, shot_dir, start_room, warp;
     long headless = -1, shot_every = 0;
     std::multimap<long, std::pair<int, long>> scripted_keys;
     for (int i = 1; i < argc; i++) {
@@ -55,6 +57,8 @@ int main(int argc, char** argv) {
         else if (a == "--save-dir") save_dir = next();
         else if (a == "--headless") headless = std::atol(next().c_str());
         else if (a == "--shot") shot = next();
+        else if (a == "--room") start_room = next();
+        else if (a == "--warp") warp = next();
         else if (a == "--shot-every") { shot_every = std::atol(next().c_str()); shot_dir = next(); }
         else if (a == "--keys") {
             std::string spec = next();
@@ -93,7 +97,18 @@ int main(int argc, char** argv) {
     game.rng = static_cast<uint32_t>(SDL_GetTicksNS());
     if (headless >= 0) game.rng = 0;   // deterministic runs
 
-    game.start();
+    auto find_room = [&](const std::string& name) {
+        for (size_t i = 0; i < game.rooms.size(); i++)
+            if (game.rooms[i] && (game.rooms[i]->name == name || std::to_string(i) == name)) return static_cast<int>(i);
+        std::fprintf(stderr, "no room %s\n", name.c_str());
+        std::exit(2);
+    };
+    if (!warp.empty()) game.warp_room = find_room(warp);
+    if (!start_room.empty()) {
+        game.load_room(find_room(start_room));
+    } else {
+        game.start();
+    }
 
     Uint64 next_frame = SDL_GetTicksNS();
     std::map<int, long> scripted_release;

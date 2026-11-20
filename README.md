@@ -25,6 +25,7 @@ Controls are the original's: arrows to move, Up or Z to jump, Down or X to advan
 
 To run without a window (for testing), use `--headless FRAMES --shot-every N DIR --keys "frame:vk[:frames],..."`.
 This runs N frames deterministically, saves screenshots, and feeds scripted key presses.
+`--warp ROOM` boots normally and swaps the first entry into level 1 for ROOM (select New Game with `--keys 330:88`).
 
 ## How it works
 
