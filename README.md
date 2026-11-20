@@ -1,14 +1,15 @@
-# Tower of Heaven port
+# Tower of Slop
+## This reimplementation (and most of the README) was made entirely by Claude Opus 5.5 Be warned!
 
 A C++/SDL3 reimplementation of the Game Maker 7 runner for Askiisoft's *Tower of Heaven*
-(2009), aiming to play the same as the original frame for frame. Linux first, Switch 2 homebrew later.
+(2009), aiming to play the same as the original frame for frame.
 
 Nothing from the game is in this repo or in the engine: its code, art, sound and music are read from your
 own copy of the game.
 
 ## Playing
 
-Put `toh` next to `Tower of Heaven.exe` from the original game and run it. The first start reads the
+Put your `Tower of Heaven.exe` from the original game in the same folder as Tower of Slop (`toh`) and run it. The first start reads the
 game's data out of the exe (under a second) and keeps it in your data folder
 (`~/.local/share/Askiisoft/Tower of Heaven/` on Linux); after that the exe isn't needed.
 `--game PATH` points at an exe somewhere else.
