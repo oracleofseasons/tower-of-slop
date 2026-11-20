@@ -17,7 +17,7 @@ X to talk and use doors, Q for the menu, W for the rulebook.
 
 Switch 2 (homebrew): put toh.nro and "Tower of Heaven.exe" together in
 sdmc:/switch/toh/ and start it from the homebrew menu. Controls: stick or
-D-pad to move, A or Y to jump, B or X to talk and use doors, + for the
-menu, - for the rulebook.
+D-pad to move, A or X to confirm, talk and use doors, B or Y to jump, + for
+the menu, - for the rulebook, + and - together to quit.
 
 Source and licence (GPL-2.0): see THIRD_PARTY.md and LICENSE.

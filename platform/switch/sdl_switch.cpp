@@ -674,7 +674,7 @@ bool g_pad_ready = false;
 u64 g_prev_buttons = 0;
 std::deque<SDL_Event> g_events;
 
-// the controller as the original's keys: move, A/Y jump (Z), B/X talk and doors (X),
+// the controller as the original's keys: move, A/X confirm, talk and doors (X), B/Y jump (Z),
 // + menu (Q), - rulebook (W)
 struct Bind { u64 button; SDL_Scancode sc; };
 const Bind kBinds[] = {
@@ -682,8 +682,8 @@ const Bind kBinds[] = {
     {HidNpadButton_Right | HidNpadButton_StickLRight, SDL_SCANCODE_RIGHT},
     {HidNpadButton_Up | HidNpadButton_StickLUp, SDL_SCANCODE_UP},
     {HidNpadButton_Down | HidNpadButton_StickLDown, SDL_SCANCODE_DOWN},
-    {HidNpadButton_A | HidNpadButton_Y, SDL_SCANCODE_Z},
-    {HidNpadButton_B | HidNpadButton_X, static_cast<SDL_Scancode>(SDL_SCANCODE_A + ('X' - 'A'))},
+    {HidNpadButton_B | HidNpadButton_Y, SDL_SCANCODE_Z},
+    {HidNpadButton_A | HidNpadButton_X, static_cast<SDL_Scancode>(SDL_SCANCODE_A + ('X' - 'A'))},
     {HidNpadButton_Plus, static_cast<SDL_Scancode>(SDL_SCANCODE_A + ('Q' - 'A'))},
     {HidNpadButton_Minus, static_cast<SDL_Scancode>(SDL_SCANCODE_A + ('W' - 'A'))},
 };
