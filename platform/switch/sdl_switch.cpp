@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <atomic>
 #include <deque>
 #include <exception>
 #include <mutex>
@@ -86,7 +87,14 @@ bool SDL_Init(Uint32) {
     open_log();
     return true;
 }
-void SDL_Quit() {}
+static void audio_shutdown();
+static void video_shutdown();
+void SDL_Quit() {
+    std::fprintf(stderr, "[switch] quitting\n");
+    audio_shutdown();
+    video_shutdown();
+    std::fprintf(stderr, "[switch] shut down\n");
+}
 const char* SDL_GetError() { return g_error.c_str(); }
 bool SDL_SetHint(const char*, const char*) { return true; }
 void SDL_free(void* p) { std::free(p); }
@@ -438,6 +446,18 @@ SDL_Surface* SDL_RenderReadPixels(SDL_Renderer* r, const SDL_Rect* rect) {
     return s;
 }
 
+static void video_shutdown() {
+    SDL_Renderer* r = g_renderer;
+    if (!r) return;
+    glFinish();
+    eglMakeCurrent(r->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    eglDestroyContext(r->display, r->context);
+    eglDestroySurface(r->display, r->surface);
+    eglTerminate(r->display);
+    g_renderer = nullptr;
+    std::fprintf(stderr, "[switch] EGL closed\n");
+}
+
 bool SDL_RenderPresent(SDL_Renderer* r) {
     eglSwapBuffers(r->display, r->surface);
     return true;
@@ -469,6 +489,10 @@ struct SDL_AudioStream {
 
 namespace {
 std::mutex g_audio_mutex;
+std::atomic<bool> g_audio_quit{false};
+bool g_audio_running = false;
+Thread g_audio_thread;
+AudioOutBuffer g_bufs[4]{};
 std::vector<SDL_AudioStream*> g_streams;
 constexpr int kOutRate = 48000;
 constexpr uint32_t kBufferFrames = 1024;
@@ -522,8 +546,7 @@ void mix(int16_t* out, uint32_t frames) {
 }
 
 void audio_thread(void*) {
-    AudioOutBuffer bufs[4]{};
-    for (auto& b : bufs) {
+    for (auto& b : g_bufs) {
         b.buffer = aligned_alloc(0x1000, kBufferFrames * 4);
         b.buffer_size = kBufferFrames * 4;
         b.data_size = kBufferFrames * 4;
@@ -531,10 +554,11 @@ void audio_thread(void*) {
         armDCacheFlush(b.buffer, b.buffer_size);
         audoutAppendAudioOutBuffer(&b);
     }
-    for (;;) {
+    while (!g_audio_quit) {
         AudioOutBuffer* released = nullptr;
         u32 count = 0;
-        if (R_FAILED(audoutWaitPlayFinish(&released, &count, UINT64_MAX)) || !released) continue;
+        // wake every 100 ms so SDL_Quit can stop this thread
+        if (R_FAILED(audoutWaitPlayFinish(&released, &count, 100000000ull)) || !released) continue;
         mix(static_cast<int16_t*>(released->buffer), kBufferFrames);
         armDCacheFlush(released->buffer, released->buffer_size);
         audoutAppendAudioOutBuffer(released);
@@ -542,16 +566,28 @@ void audio_thread(void*) {
 }
 }  // namespace
 
+static void audio_shutdown() {
+    if (!g_audio_running) return;
+    g_audio_quit = true;
+    threadWaitForExit(&g_audio_thread);
+    threadClose(&g_audio_thread);
+    audoutStopAudioOut();
+    audoutExit();
+    for (auto& b : g_bufs) std::free(b.buffer);
+    g_audio_running = false;
+    std::fprintf(stderr, "[switch] audio stopped\n");
+}
+
 SDL_AudioDeviceID SDL_OpenAudioDevice(SDL_AudioDeviceID, const SDL_AudioSpec*) {
     std::fprintf(stderr, "[switch] starting audout\n");
     Result rc = audoutInitialize();
     if (R_FAILED(rc)) { std::fprintf(stderr, "[switch] audoutInitialize: 0x%x\n", rc); return fail("audout unavailable"), 0; }
     rc = audoutStartAudioOut();
     if (R_FAILED(rc)) { std::fprintf(stderr, "[switch] audoutStartAudioOut: 0x%x\n", rc); return fail("audout unavailable"), 0; }
-    static Thread thread;
-    rc = threadCreate(&thread, audio_thread, nullptr, nullptr, 0x20000, 0x2B, -2);
-    if (R_SUCCEEDED(rc)) rc = threadStart(&thread);
+    rc = threadCreate(&g_audio_thread, audio_thread, nullptr, nullptr, 0x20000, 0x2B, -2);
+    if (R_SUCCEEDED(rc)) rc = threadStart(&g_audio_thread);
     if (R_FAILED(rc)) { std::fprintf(stderr, "[switch] audio thread: 0x%x\n", rc); return fail("no audio thread"), 0; }
+    g_audio_running = true;
     std::fprintf(stderr, "[switch] audio: %u Hz, %u channels\n", audoutGetSampleRate(), audoutGetChannelCount());
     return 1;
 }

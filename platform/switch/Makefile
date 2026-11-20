@@ -13,7 +13,7 @@ BUILD		:=	build
 SOURCES		:=	. ../../runtime ../../third_party/stb_vorbis
 INCLUDES	:=	include ../../runtime
 APP_TITLE	:=	Tower of Heaven (port)
-APP_AUTHOR	:=	fan port; needs your copy of the game
+APP_AUTHOR	:=	oracleofseasons, Claude Opus 5.5
 APP_VERSION	:=	0.1.0
 
 ARCH	:=	$(SWITCH2_CPU) -mtp=soft -fPIE

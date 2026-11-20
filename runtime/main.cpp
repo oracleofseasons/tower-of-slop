@@ -189,8 +189,7 @@ int main(int argc, char** argv) {
     pak = prepare_pak(pak, game_exe, data_dir, headless >= 0);
     if (pak.empty()) return 1;
 #ifdef __SWITCH__
-    if (std::string exe = find_exe(game_exe, data_dir); !exe.empty() && argc > 0)
-        toh_switch_install_icon(exe, argv[0], data_dir);
+    if (argc > 0) toh_switch_install_icon(find_exe(game_exe, data_dir), argv[0], data_dir);
 #endif
     std::fprintf(stderr, "loading %s\n", pak.c_str());
     if (!game.load(pak)) { std::fprintf(stderr, "loading %s failed\n", pak.c_str()); return 1; }

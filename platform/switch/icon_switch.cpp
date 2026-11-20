@@ -40,18 +40,55 @@ void wr64(std::vector<uint8_t>& d, size_t o, uint64_t v) { std::memcpy(&d[o], &v
 
 }  // namespace
 
-// Returns true when the icon is in place (now or from an earlier run).
-bool toh_switch_install_icon(const std::string& exe, const std::string& self_nro, const std::string& data_dir) {
-    std::string done = data_dir + "icon.jpg";
-    SDL_PathInfo info;
-    if (SDL_GetPathInfo(done.c_str(), &info)) return true;
+// the icon currently in an NRO, read without loading the whole file
+static std::vector<uint8_t> nro_icon(const std::string& path) {
+    std::vector<uint8_t> out;
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return out;
+    uint8_t head[0x20], aset[0x38];
+    uint32_t at = 0;
+    if (std::fread(head, 1, sizeof head, f) == sizeof head && std::memcmp(head + 0x10, "NRO0", 4) == 0) {
+        std::memcpy(&at, head + 0x18, 4);
+        uint64_t off = 0, size = 0;
+        if (std::fseek(f, at, SEEK_SET) == 0 && std::fread(aset, 1, sizeof aset, f) == sizeof aset &&
+            std::memcmp(aset, "ASET", 4) == 0) {
+            std::memcpy(&off, aset + 0x08, 8);
+            std::memcpy(&size, aset + 0x10, 8);
+            if (size < (1u << 20) && std::fseek(f, static_cast<long>(at + off), SEEK_SET) == 0) {
+                out.resize(size);
+                if (std::fread(out.data(), 1, size, f) != size) out.clear();
+            }
+        }
+    }
+    std::fclose(f);
+    return out;
+}
 
+static std::vector<uint8_t> icon_jpeg_from_exe(const std::string& exe);
+static bool write_icon(const std::string& self_nro, const std::vector<uint8_t>& jpg);
+
+// Puts the game's icon into this NRO when it isn't there (first run, or after the NRO was replaced
+// with a new release). The icon comes from the exe once and is kept as icon.jpg in the data folder.
+bool toh_switch_install_icon(const std::string& exe, const std::string& self_nro, const std::string& data_dir) {
+    std::string saved = data_dir + "icon.jpg";
+    std::vector<uint8_t> jpg = read_file(saved);
+    if (jpg.empty()) {
+        if (exe.empty()) return false;
+        jpg = icon_jpeg_from_exe(exe);
+        if (jpg.empty()) return false;
+        write_file(saved, jpg);
+    }
+    if (nro_icon(self_nro) == jpg) return true;
+    return write_icon(self_nro, jpg);
+}
+
+static std::vector<uint8_t> icon_jpeg_from_exe(const std::string& exe) {
     int w = 0, h = 0;
     std::vector<uint8_t> rgba;
     std::string err;
     if (!gml::extract_icon(exe, w, h, rgba, err)) {
         std::fprintf(stderr, "[icon] %s\n", err.c_str());
-        return false;
+        return {};
     }
     // 256x256, pixels kept sharp, transparency over black
     const int size = 256;
@@ -67,7 +104,10 @@ bool toh_switch_install_icon(const std::string& exe, const std::string& self_nro
         auto* v = static_cast<std::vector<uint8_t>*>(ctx);
         v->insert(v->end(), static_cast<uint8_t*>(data), static_cast<uint8_t*>(data) + n);
     }, &jpg, size, size, 3, rgb.data(), 95);
+    return jpg;
+}
 
+static bool write_icon(const std::string& self_nro, const std::vector<uint8_t>& jpg) {
     // NRO: the asset section starts at the header's size field (0x18); "ASET", version, then
     // (offset, size) pairs for icon, NACP and RomFS, relative to the section
     std::vector<uint8_t> nro = read_file(self_nro);
@@ -102,7 +142,6 @@ bool toh_switch_install_icon(const std::string& exe, const std::string& self_nro
         std::remove(tmp.c_str());
         return false;
     }
-    write_file(done, jpg);
     std::fprintf(stderr, "[icon] installed the game's icon into %s\n", self_nro.c_str());
     return true;
 }
