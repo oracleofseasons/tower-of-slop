@@ -8,8 +8,12 @@ The same GML is injected into both:
 Exactly one host logs per frame: obj_scale if it exists, otherwise obj_scale2
 (obj_scale lives in the levels, obj_scale2 on the title and ending screens).
 
+With --record, the original also logs every change of the game's keys to keys_rec.txt
+("counter vk down follows_transition" per line, from the begin step); rec2keys.py turns that
+into a key file for compare.sh. Only game/ is written then.
+
 usage: instrument.py --exe ORIGINAL.exe --project extracted/project --out DIR
-                     [--seed N] [--keys "frame:vk[:frames],..."]
+                     [--seed N] [--keys "frame:vk[:frames],..."] [--record]
 writes DIR/game/  (instrumented exe + its DLL, quality.txt = 1)
        DIR/project/  (instrumented copy of the extracted project, for the port)
 """
@@ -23,6 +27,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import gm7patch  # noqa: E402
 
 HOSTS = ['obj_scale', 'obj_scale2']
+# every key the game reads: vk_escape, the arrows, Q, W, X, Z
+GAME_KEYS = [27, 37, 38, 39, 40, 81, 87, 88, 90]
 
 
 def key_schedule(spec):
@@ -37,11 +43,31 @@ def key_schedule(spec):
     return out
 
 
-def gml(seed, keys):
+def record_gml():
+    """begin-step GML logging key changes, as seen by keyboard_check at the start of the frame.
+    follows_transition = 1 when the previous begin step saw the same counter (a room-change frame
+    whose end step never ran), so the replay can't put the change on the exact frame."""
+    out = ['__c = global.__trace_f; __tr = (global.__rec_lc = __c); global.__rec_lc = __c; __rf = -1;']
+    for vk in GAME_KEYS:
+        out.append(f'__d = keyboard_check({vk}); if __d != global.__rk_{vk} {{ global.__rk_{vk} = __d; '
+                   f'if __rf < 0 {{ __rf = file_text_open_append("keys_rec.txt"); }} '
+                   f'file_text_write_string(__rf, string(__c) + " {vk} " + string(__d) + " " + string(__tr)); '
+                   f'file_text_writeln(__rf); }}')
+    out.append('if __rf >= 0 { file_text_close(__rf); }')
+    return out
+
+
+def gml(seed, keys, record=False):
     guard = '(object_index = obj_scale or !instance_exists(obj_scale))'
+    rec_init = ''
+    if record:
+        rec_init = ('__tf = file_text_open_write("keys_rec.txt"); file_text_close(__tf); global.__rec_lc = -1; '
+                    + ' '.join(f'global.__rk_{vk} = 0;' for vk in GAME_KEYS) + ' ')
     create = (f'if !variable_global_exists("__trace_f") {{ global.__trace_f = 0; random_set_seed({seed}); '
-              f'__tf = file_text_open_write("trace.txt"); file_text_close(__tf); }}\n')
+              f'__tf = file_text_open_write("trace.txt"); file_text_close(__tf); {rec_init}}}\n')
     lines = [f'if global.__trace_f = {f} {{ {" ".join(sts)} }}' for f, sts in sorted(keys.items())]
+    if record:
+        lines += record_gml()
     begin = f'if {guard} {{\n' + '\n'.join(lines) + '\n}\n'
     end = (f'\nif {guard} {{\n'
            '__tf = file_text_open_append("trace.txt");\n'
@@ -63,11 +89,12 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--keys', default='', help='"frame:vk[:frames],..." or @file')
+    ap.add_argument('--record', action='store_true', help='log real key changes in the original')
     a = ap.parse_args()
     if a.keys.startswith('@'):
         a.keys = open(a.keys[1:]).read().strip()
 
-    create, begin, end = gml(a.seed, key_schedule(a.keys))
+    create, begin, end = gml(a.seed, key_schedule(a.keys), a.record)
     edits = {'create_0.gml': lambda s: create + s, 'begin_step.gml': lambda s: begin + s,
              'end_step.gml': lambda s: s + end}
 
@@ -87,7 +114,7 @@ def main():
             new = fn(old)
             wanted[rel] = new.encode('latin-1')
             patches.append((old, new))
-    for rel, data in wanted.items():
+    for rel, data in ([] if a.record else wanted.items()):
         path = os.path.join(pdst, rel)
         if os.path.exists(path) and open(path, 'rb').read() == data:
             continue
